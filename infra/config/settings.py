@@ -5,7 +5,7 @@ DEFAULTS = {
     "api_base_url": "https://satirriga.snirh.gov.br/api",
     "sso_base_url": "https://sso.snirh.gov.br",
     "sso_realm": "ana",
-    "sso_client_id": "sat-irriga-v2",
+    "sso_client_id": "sat-irriga-plugin",
     "environment": "production",
     "gpkg_base_dir": "",
     "page_size": 15,
