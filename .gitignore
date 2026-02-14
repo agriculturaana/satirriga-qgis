@@ -165,5 +165,6 @@ config.json
 *.gpkg-shm
 *.db
 
-# Analysis docs (nao versionar)
+# Docs locais (nao versionar)
 ANALISE_PROJETO.md
+CLAUDE.md
