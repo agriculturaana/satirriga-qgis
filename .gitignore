@@ -167,5 +167,7 @@ config.json
 
 # Docs locais (nao versionar)
 *.md
+!LICENSE.md
+!README.md
 *.zip
 
