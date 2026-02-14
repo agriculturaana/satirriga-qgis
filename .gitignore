@@ -164,3 +164,6 @@ config.json
 *.gpkg-wal
 *.gpkg-shm
 *.db
+
+# Analysis docs (nao versionar)
+ANALISE_PROJETO.md
