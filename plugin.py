@@ -5,6 +5,7 @@ from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 from qgis.core import QgsMessageLog, Qgis
 
+from . import resources  # noqa: F401 — registra icone no Qt Resource System
 from .infra.config.settings import PLUGIN_NAME
 from .infra.config.repository import ConfigRepository
 from .infra.http.auth_interceptor import AuthInterceptor

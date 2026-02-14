@@ -1,5 +1,5 @@
 PLUGIN_NAME = "SatIrriga"
-PLUGIN_VERSION = "2.0.0-alpha.1"
+PLUGIN_VERSION = "2.0.0"
 
 DEFAULTS = {
     "api_base_url": "https://satirriga.snirh.gov.br/api",
