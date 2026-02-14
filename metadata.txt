@@ -1,21 +1,21 @@
 [general]
-name=SatIrriga QGIS Cliente
+name=SatIrriga QGIS
 qgisMinimumVersion=3.22
-description=Cliente do SatIrriga para mapeamento de irrigacao — workflow completo de listagem, download, edicao e envio de classificacoes.
-version=2.0.0-alpha.1
+description=Consulte, baixe, edite e envie mapeamentos de irrigacao do SatIrriga direto no QGIS.
+version=2.0.0
 author=Tharles de Sousa Andrade ANA - INPE
 email=irtharles@gmail.com
 
-about=Plugin QGIS para o sistema SatIrriga. Permite autenticacao SSO (Keycloak OIDC PKCE), listagem de mapeamentos, download de classificacoes como GeoPackage editavel, edicao de geometrias com ferramentas nativas do QGIS, e envio das alteracoes ao servidor.
+about=Acesse o SatIrriga sem sair do QGIS. Faca login seguro (SSO), navegue pelos mapeamentos, baixe classificacoes como GeoPackage editavel, ajuste geometrias com as ferramentas do QGIS e envie as alteracoes de volta ao servidor.
 
-tracker=http://bugs
-repository=http://repo
+tracker=https://github.com/agriculturaana/satirriga-qgis/issues
+repository=https://github.com/agriculturaana/satirriga-qgis
 
-hasProcessingProvider=no
+hasProcessingProvider=False
 tags=python,irrigation,remote-sensing,mapping,geopackage
 
-homepage=http://homepage
-category=Plugins
+homepage=https://github.com/agriculturaana/satirriga-qgis
+category=Vector
 icon=icon.png
 experimental=True
 deprecated=False
