@@ -105,7 +105,7 @@ class SatIrrigaPlugin:
     # ------------------------------------------------------------------
 
     def initGui(self):
-        icon_path = ":/plugins/satirriga_cliente/icon.png"
+        icon_path = ":/plugins/satirriga_qgis/icon.png"
         self.add_action(
             icon_path,
             text=self.tr("SatIrriga"),

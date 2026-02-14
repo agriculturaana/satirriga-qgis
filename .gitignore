@@ -166,5 +166,6 @@ config.json
 *.db
 
 # Docs locais (nao versionar)
-ANALISE_PROJETO.md
-CLAUDE.md
+*.md
+*.zip
+

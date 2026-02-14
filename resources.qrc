@@ -1,5 +1,5 @@
 <RCC>
-    <qresource prefix="/plugins/satirriga_cliente" >
+    <qresource prefix="/plugins/satirriga_qgis" >
         <file>icon.png</file>
     </qresource>
 </RCC>
