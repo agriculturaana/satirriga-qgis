@@ -1,42 +1,40 @@
 <html>
 <body>
-<h3>Plugin Builder Results</h3>
+<h3>SatIrriga QGIS &mdash; Plugin v2</h3>
 
-Congratulations! You just built a plugin for QGIS!<br/><br />
+<p>Consulte, baixe, edite e envie mapeamentos de irrigacao direto no QGIS.</p>
 
-<div id='help' style='font-size:.9em;'>
-Your plugin <b>SatIrrigaQGISCliente</b> was created in:<br>
-&nbsp;&nbsp;<b>/home/tharles/projects_ana_inpe/satirriga_cliente</b>
-<p>
-Your QGIS plugin directory is located at:<br>
-&nbsp;&nbsp;<b>/home/tharles/.local/share/QGIS/QGIS3/profiles/default/python/plugins</b>
-<p>
-<h3>What's Next</h3>
-<ol>
-    <li>In your plugin directory, compile the resources file using pyrcc5 (simply run <b>make</b> if you have automake or use <b>pb_tool</b>)
-    <li>Test the generated sources using <b>make test</b> (or run tests from your IDE)
-    <li>Copy the entire directory containing your new plugin to the QGIS plugin directory (see Notes below)
-    <li>Test the plugin by enabling it in the QGIS plugin manager
-    <li>Customize it by editing the implementation file <b>satirriga_cliente.py</b>
-    <li>Create your own custom icon, replacing the default <b>icon.png</b>
-    <li>Modify your user interface by opening <b>satirriga_cliente_dockwidget_base.ui</b> in Qt Designer
-</ol>
-Notes:
+<h4>Requisitos</h4>
 <ul>
-    <li>You can use the <b>Makefile</b> to compile and deploy when you
-        make changes. This requires GNU make (gmake). The Makefile is ready to use, however you 
-        will have to edit it to add addional Python source files, dialogs, and translations.
-    <li>You can also use <b>pb_tool</b> to compile and deploy your plugin. Tweak the <i>pb_tool.cfg</i> file included with your plugin as you add files. Install <b>pb_tool</b> using 
-        <i>pip</i> or <i>easy_install</i>. See <b>http://loc8.cc/pb_tool</b> for more information.
+    <li>QGIS 3.22 ou superior</li>
+    <li>Acesso ao servidor SatIrriga (credenciais SSO)</li>
 </ul>
-</div>
-<div style='font-size:.9em;'>
-<p>
-For information on writing PyQGIS code, see <b>http://loc8.cc/pyqgis_resources</b> for a list of resources.
-</p>
-</div>
-<p>
-&copy;2011-2018 GeoApt LLC - geoapt.com 
-</p>
+
+<h4>Instalacao</h4>
+<ol>
+    <li>Copie a pasta do plugin para o diretorio de plugins do QGIS:<br>
+        <code>~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/satirriga_cliente/</code><br>
+        Ou use: <code>make deploy</code></li>
+    <li>Abra o QGIS e ative o plugin em <b>Plugins &gt; Gerenciar e Instalar Plugins</b></li>
+</ol>
+
+<h4>Desenvolvimento</h4>
+<ul>
+    <li><code>make deploy</code> &mdash; Deploya no QGIS local</li>
+    <li><code>make test</code> &mdash; Roda todos os testes</li>
+    <li><code>make test-unit</code> &mdash; Roda somente testes unitarios</li>
+    <li><code>make compile</code> &mdash; Compila resources.qrc</li>
+    <li><code>make clean</code> &mdash; Limpa arquivos gerados</li>
+</ul>
+
+<h4>Uso</h4>
+<ol>
+    <li>Clique no icone <b>SatIrriga</b> na toolbar</li>
+    <li>Faca login na aba <b>Sessao</b></li>
+    <li>Navegue pelos mapeamentos, baixe classificacoes e edite geometrias</li>
+    <li>Envie as alteracoes pela aba <b>Camadas</b></li>
+</ol>
+
+<p>Repositorio: <a href="https://github.com/agriculturaana/satirriga-qgis">github.com/agriculturaana/satirriga-qgis</a></p>
 </body>
 </html>

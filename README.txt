@@ -1,32 +1,29 @@
-Plugin Builder Results
+SatIrriga QGIS — Plugin v2
 
-Your plugin SatIrrigaQGISCliente was created in:
-    /home/tharles/projects_ana_inpe/satirriga_cliente
+Consulte, baixe, edite e envie mapeamentos de irrigacao direto no QGIS.
 
-Your QGIS plugin directory is located at:
-    /home/tharles/.local/share/QGIS/QGIS3/profiles/default/python/plugins
+Requisitos:
+  * QGIS 3.22 ou superior
+  * Acesso ao servidor SatIrriga (credenciais SSO)
 
-What's Next:
+Instalacao:
+  1. Copie a pasta do plugin para o diretorio de plugins do QGIS:
+     ~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/satirriga_cliente/
+     Ou use: make deploy
 
-  * Copy the entire directory containing your new plugin to the QGIS plugin
-    directory
+  2. Abra o QGIS e ative o plugin em Plugins > Gerenciar e Instalar Plugins
 
-  * Compile the resources file using pyrcc5
+Desenvolvimento:
+  * make deploy    — Deploya no QGIS local
+  * make test      — Roda todos os testes
+  * make test-unit — Roda somente testes unitarios
+  * make compile   — Compila resources.qrc
+  * make clean     — Limpa arquivos gerados
 
-  * Run the tests (``make test``)
+Uso:
+  1. Clique no icone SatIrriga na toolbar
+  2. Faca login na aba Sessao
+  3. Navegue pelos mapeamentos, baixe classificacoes e edite geometrias
+  4. Envie as alteracoes pela aba Camadas
 
-  * Test the plugin by enabling it in the QGIS plugin manager
-
-  * Customize it by editing the implementation file: ``satirriga_cliente.py``
-
-  * Create your own custom icon, replacing the default icon.png
-
-  * Modify your user interface by opening SatIrrigaQGISCliente_dockwidget_base.ui in Qt Designer
-
-  * You can use the Makefile to compile your Ui and resource files when
-    you make changes. This requires GNU make (gmake)
-
-For more information, see the PyQGIS Developer Cookbook at:
-http://www.qgis.org/pyqgis-cookbook/index.html
-
-(C) 2011-2018 GeoApt LLC - geoapt.com
+Repositorio: https://github.com/agriculturaana/satirriga-qgis
