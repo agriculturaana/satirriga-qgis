@@ -1,0 +1,48 @@
+{
+    "id": 1,
+    "descricao": "Mapeamento Cerrado 2024",
+    "dataReferencia": "2024-01-15",
+    "status": "DONE",
+    "satelite": "Sentinel-2",
+    "regiao": "Centro-Oeste",
+    "areaTotalHa": 150000.5,
+    "metodoMapeamentos": [
+        {
+            "id": 10,
+            "metodoApply": "RANDOM_FOREST",
+            "status": "DONE",
+            "mapeamentoId": 1,
+            "totalGeometrias": 5000,
+            "metodoGeometrias": [
+                {
+                    "id": 100,
+                    "idSeg": 1,
+                    "areaHa": 12.5,
+                    "grupo": "Irrigado",
+                    "consolidado": true,
+                    "homologado": false,
+                    "uniqueHash": "abc123",
+                    "tile": "T22KGF"
+                },
+                {
+                    "id": 101,
+                    "idSeg": 2,
+                    "areaHa": 8.3,
+                    "grupo": "Nao Irrigado",
+                    "consolidado": false,
+                    "homologado": false,
+                    "uniqueHash": "def456",
+                    "tile": "T22KGF"
+                }
+            ]
+        },
+        {
+            "id": 11,
+            "metodoApply": "SVM",
+            "status": "DONE",
+            "mapeamentoId": 1,
+            "totalGeometrias": 3000,
+            "metodoGeometrias": []
+        }
+    ]
+}

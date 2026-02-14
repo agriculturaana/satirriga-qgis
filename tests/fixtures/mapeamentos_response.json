@@ -1,0 +1,58 @@
+{
+    "content": [
+        {
+            "id": 1,
+            "descricao": "Mapeamento Cerrado 2024",
+            "dataReferencia": "2024-01-15",
+            "status": "DONE",
+            "satelite": "Sentinel-2",
+            "regiao": "Centro-Oeste",
+            "areaTotalHa": 150000.5,
+            "metodoMapeamentos": [
+                {
+                    "id": 10,
+                    "metodoApply": "RANDOM_FOREST",
+                    "status": "DONE",
+                    "mapeamentoId": 1,
+                    "totalGeometrias": 5000
+                },
+                {
+                    "id": 11,
+                    "metodoApply": "SVM",
+                    "status": "PROCESSING",
+                    "mapeamentoId": 1,
+                    "totalGeometrias": 0
+                }
+            ]
+        },
+        {
+            "id": 2,
+            "descricao": "Mapeamento Caatinga 2024",
+            "dataReferencia": "2024-03-20",
+            "status": "PROCESSING",
+            "satelite": "Landsat-8",
+            "regiao": "Nordeste",
+            "areaTotalHa": 80000.0,
+            "metodoMapeamentos": [
+                {
+                    "id": 20,
+                    "metodoApply": "DEEP_LEARNING",
+                    "status": "PROCESSING",
+                    "mapeamentoId": 2,
+                    "totalGeometrias": 0
+                }
+            ]
+        },
+        {
+            "id": 3,
+            "descricao": "Mapeamento Amazonia 2024",
+            "dataReferencia": "2024-06-01",
+            "status": "FAILED",
+            "metodoMapeamentos": []
+        }
+    ],
+    "number": 0,
+    "size": 15,
+    "totalElements": 3,
+    "totalPages": 1
+}

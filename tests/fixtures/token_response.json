@@ -1,0 +1,8 @@
+{
+    "access_token": "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEyMyIsIm5hbWUiOiJUaGFybGVzIEFuZHJhZGUiLCJlbWFpbCI6InRoYXJsZXNAZXhhbXBsZS5jb20iLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJ0aGFybGVzIiwiZXhwIjoxOTAwMDAwMDAwLCJyZWFsbV9hY2Nlc3MiOnsicm9sZXMiOlsidXNlciIsImFkbWluIl19fQ.fakesig",
+    "refresh_token": "fake-refresh-token-for-tests",
+    "token_type": "Bearer",
+    "expires_in": 300,
+    "refresh_expires_in": 1800,
+    "scope": "openid profile email"
+}
