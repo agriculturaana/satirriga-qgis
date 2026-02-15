@@ -1,6 +1,6 @@
 import os
 
-from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt
+from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
 from qgis.core import QgsMessageLog, Qgis
@@ -15,7 +15,6 @@ from .app.controllers.auth_controller import AuthController
 from .ui.dock import SatIrrigaDock
 from .app.controllers.mapeamento_controller import MapeamentoController
 from .ui.widgets.session_header import SessionHeader
-from .ui.widgets.sessao_tab import SessaoTab
 from .ui.widgets.mapeamentos_tab import MapeamentosTab
 from .ui.widgets.camadas_tab import CamadasTab
 from .ui.widgets.config_tab import ConfigTab
@@ -120,8 +119,9 @@ class SatIrrigaPlugin:
         hosts = [h for h in (api_host, sso_host) if h]
         self._auth_interceptor.update_allowed_hosts(hosts)
 
-        # Tenta restaurar sessao anterior
-        self._auth_controller.try_restore_session()
+        # Adia restauracao de sessao para apos o QGIS finalizar o startup
+        # (evita SIGABRT por chamada de rede durante a splash screen)
+        QTimer.singleShot(500, self._auth_controller.try_restore_session)
 
         self._log("Plugin v2 carregado")
 
@@ -177,34 +177,27 @@ class SatIrrigaPlugin:
         old_label.deleteLater()
         self.dock._user_label = session_header
 
-        # Auth: SessaoTab na aba "Sessao" (index 3)
-        sessao_tab = SessaoTab(
-            state=self._state,
-            auth_controller=self._auth_controller,
-        )
-        self.dock.replace_tab(3, sessao_tab, "Sessao")
-
-        # Mapeamentos: MapeamentosTab na aba "Mapeamentos" (index 0)
+        # Mapeamentos: page 0
         mapeamentos_tab = MapeamentosTab(
             state=self._state,
             mapeamento_controller=self._mapeamento_controller,
         )
-        self.dock.replace_tab(0, mapeamentos_tab, "Mapeamentos")
+        self.dock.set_page_widget(SatIrrigaDock.PAGE_MAPEAMENTOS, mapeamentos_tab)
 
-        # Camadas: CamadasTab na aba "Camadas" (index 1)
+        # Camadas: page 1
         camadas_tab = CamadasTab(
             state=self._state,
             mapeamento_controller=self._mapeamento_controller,
         )
-        self.dock.replace_tab(1, camadas_tab, "Camadas")
+        self.dock.set_page_widget(SatIrrigaDock.PAGE_CAMADAS, camadas_tab)
 
-        # Config: ConfigTab na aba "Config" (index 2)
+        # Config: page 2
         config_tab = ConfigTab(config_controller=self._config_controller)
-        self.dock.replace_tab(2, config_tab, "Config")
+        self.dock.set_page_widget(SatIrrigaDock.PAGE_CONFIG, config_tab)
 
-        # Logs: LogsTab na aba "Logs" (index 4)
+        # Logs: page 3
         logs_tab = LogsTab()
-        self.dock.replace_tab(4, logs_tab, "Logs")
+        self.dock.set_page_widget(SatIrrigaDock.PAGE_LOGS, logs_tab)
 
         # Conecta download -> carregar layer no QGIS + atualizar camadas tab
         self._mapeamento_controller.download_completed.connect(
@@ -212,6 +205,27 @@ class SatIrrigaPlugin:
                 path, m_id, met_id, camadas_tab
             )
         )
+
+        # Badge de camadas modificadas
+        self._connect_camadas_badge(camadas_tab)
+
+    def _connect_camadas_badge(self, camadas_tab):
+        """Atualiza badge na NavButton de Camadas quando ha features modificadas."""
+        camadas_btn = self.dock.activity_bar.button_at(1)  # index 1 = Camadas
+        if not camadas_btn:
+            return
+
+        original_refresh = camadas_tab._refresh_list
+
+        def refresh_with_badge():
+            original_refresh()
+            modified_total = sum(
+                entry.get("sync_counts", {}).get("MODIFIED", 0)
+                for entry in camadas_tab._gpkg_list
+            )
+            camadas_btn.set_badge(modified_total)
+
+        camadas_tab._refresh_list = refresh_with_badge
 
     def _on_download_completed(self, gpkg_path, mapeamento_id, metodo_id, camadas_tab):
         """Carrega GPKG no projeto QGIS apos download."""

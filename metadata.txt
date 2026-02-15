@@ -3,7 +3,7 @@ name=SatIrriga QGIS
 qgisMinimumVersion=3.22
 description=Consulte, baixe, edite e envie mapeamentos de irrigacao do SatIrriga direto no QGIS.
 version=2.0.0
-author=Tharles de Sousa Andrade ANA - INPE
+author=Tharles de Sousa Andrade | ANA | INPE
 email=irtharles@gmail.com
 
 about=Acesse o SatIrriga sem sair do QGIS. Faca login seguro (SSO), navegue pelos mapeamentos, baixe classificacoes como GeoPackage editavel, ajuste geometrias com as ferramentas do QGIS e envie as alteracoes de volta ao servidor.

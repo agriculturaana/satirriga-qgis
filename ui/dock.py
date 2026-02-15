@@ -4,18 +4,26 @@ from qgis.PyQt.QtCore import pyqtSignal, Qt
 from qgis.PyQt.QtGui import QPixmap
 from qgis.PyQt.QtWidgets import (
     QDockWidget, QVBoxLayout, QHBoxLayout, QWidget,
-    QTabWidget, QLabel,
+    QStackedWidget, QLabel,
 )
 
 from ..infra.config.settings import (
     PLUGIN_VERSION, ENVIRONMENT_COLORS, ENVIRONMENT_LABELS,
 )
+from .widgets.activity_bar import ActivityBar
+from .theme import DOCK_STYLESHEET
 
 
 class SatIrrigaDock(QDockWidget):
-    """Dock principal do plugin com abas."""
+    """Dock principal do plugin com Activity Bar + QStackedWidget."""
 
     closed = pyqtSignal()
+
+    # Indices das paginas
+    PAGE_MAPEAMENTOS = 0
+    PAGE_CAMADAS = 1
+    PAGE_CONFIG = 2
+    PAGE_LOGS = 3
 
     def __init__(self, state, config_repo, parent=None):
         super().__init__(parent)
@@ -29,45 +37,53 @@ class SatIrrigaDock(QDockWidget):
 
     def _build_ui(self):
         container = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
+        container.setStyleSheet(DOCK_STYLESHEET)
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
         # Header
+        header_widget = QWidget()
+        header_widget.setStyleSheet("border-bottom: 1px solid palette(mid);")
         self._header = self._build_header()
-        layout.addLayout(self._header)
+        header_widget.setLayout(self._header)
+        header_widget.setFixedHeight(44)
+        main_layout.addWidget(header_widget)
 
-        # Tab widget
-        self._tabs = QTabWidget()
-        self._tabs.setDocumentMode(True)
+        # Content: ActivityBar + QStackedWidget
+        content = QHBoxLayout()
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(0)
 
-        self._mapeamentos_placeholder = QLabel("Mapeamentos (requer login)")
-        self._mapeamentos_placeholder.setAlignment(Qt.AlignCenter)
-        self._tabs.addTab(self._mapeamentos_placeholder, "Mapeamentos")
+        # Activity Bar
+        self._activity_bar = ActivityBar()
+        self._setup_nav_buttons()
+        content.addWidget(self._activity_bar)
 
-        self._camadas_placeholder = QLabel("Camadas locais")
-        self._camadas_placeholder.setAlignment(Qt.AlignCenter)
-        self._tabs.addTab(self._camadas_placeholder, "Camadas")
+        # Pages
+        self._pages = QStackedWidget()
+        self._pages.setStyleSheet("")
 
-        self._config_placeholder = QLabel("Configuracoes")
-        self._config_placeholder.setAlignment(Qt.AlignCenter)
-        self._tabs.addTab(self._config_placeholder, "Config")
+        # Placeholders (serao substituidos via set_page_widget)
+        for label_text in ("Mapeamentos (requer login)", "Camadas locais",
+                           "Configuracoes", "Logs"):
+            placeholder = QLabel(label_text)
+            placeholder.setAlignment(Qt.AlignCenter)
+            placeholder.setStyleSheet("font-size: 12px;")
+            self._pages.addWidget(placeholder)
 
-        self._sessao_placeholder = QLabel("Sessao (requer login)")
-        self._sessao_placeholder.setAlignment(Qt.AlignCenter)
-        self._tabs.addTab(self._sessao_placeholder, "Sessao")
+        content.addWidget(self._pages)
 
-        self._logs_placeholder = QLabel("Logs")
-        self._logs_placeholder.setAlignment(Qt.AlignCenter)
-        self._tabs.addTab(self._logs_placeholder, "Logs")
+        content_widget = QWidget()
+        content_widget.setLayout(content)
+        main_layout.addWidget(content_widget)
 
-        layout.addWidget(self._tabs)
-
-        container.setLayout(layout)
+        container.setLayout(main_layout)
         self.setWidget(container)
 
     def _build_header(self):
         header = QHBoxLayout()
+        header.setContentsMargins(8, 4, 8, 4)
         header.setSpacing(8)
 
         # Logo
@@ -80,14 +96,14 @@ class SatIrrigaDock(QDockWidget):
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path)
             logo_label.setPixmap(
-                pixmap.scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                pixmap.scaled(28, 28, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             )
-        logo_label.setFixedSize(32, 32)
+        logo_label.setFixedSize(28, 28)
         header.addWidget(logo_label)
 
         # Title
         title = QLabel(f"SatIrriga v{PLUGIN_VERSION}")
-        title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        title.setStyleSheet("font-size: 13px; font-weight: bold; border: none;")
         header.addWidget(title)
 
         # Environment chip
@@ -97,47 +113,61 @@ class SatIrrigaDock(QDockWidget):
         self._env_chip = QLabel(env_label)
         self._env_chip.setStyleSheet(
             f"background-color: {env_color}; color: white; "
-            f"padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;"
+            f"padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: bold; border: none;"
         )
-        self._env_chip.setFixedHeight(20)
+        self._env_chip.setFixedHeight(18)
         header.addWidget(self._env_chip)
 
         header.addStretch()
 
-        # User area (will be replaced by SessionHeader widget in Phase 2)
+        # User area (sera substituido pelo SessionHeader via plugin.py)
         self._user_label = QLabel("Nao autenticado")
-        self._user_label.setStyleSheet("font-size: 11px; color: #757575;")
+        self._user_label.setStyleSheet("font-size: 11px; border: none;")
         header.addWidget(self._user_label)
 
         return header
 
+    def _setup_nav_buttons(self):
+        """Cria botoes de navegacao na Activity Bar."""
+        self._activity_bar.add_button("nav_mapeamentos", "Mapeamentos", self.PAGE_MAPEAMENTOS)
+        self._activity_bar.add_button("nav_camadas", "Camadas", self.PAGE_CAMADAS)
+        self._activity_bar.add_stretch()
+        self._activity_bar.add_button("nav_config", "Configuracoes", self.PAGE_CONFIG)
+        self._activity_bar.add_button("nav_logs", "Logs", self.PAGE_LOGS)
+
     def _connect_signals(self):
+        self._activity_bar.page_changed.connect(self._pages.setCurrentIndex)
         self._state.auth_state_changed.connect(self._on_auth_changed)
         self._state.user_changed.connect(self._on_user_changed)
 
     def _on_auth_changed(self, is_authenticated):
-        if not is_authenticated:
+        if isinstance(self._user_label, QLabel) and not is_authenticated:
             self._user_label.setText("Nao autenticado")
 
     def _on_user_changed(self, user):
+        if not isinstance(self._user_label, QLabel):
+            return
         if user:
             display = getattr(user, "name", None) or getattr(user, "email", "Usuario")
             self._user_label.setText(display)
         else:
             self._user_label.setText("Nao autenticado")
 
-    def replace_tab(self, index, widget, title=None):
-        """Substitui o placeholder de uma aba por um widget real."""
-        old = self._tabs.widget(index)
-        current_title = title or self._tabs.tabText(index)
-        self._tabs.removeTab(index)
-        self._tabs.insertTab(index, widget, current_title)
+    def set_page_widget(self, page_index, widget):
+        """Substitui placeholder de uma pagina por widget real."""
+        old = self._pages.widget(page_index)
+        self._pages.removeWidget(old)
         if old:
             old.deleteLater()
+        self._pages.insertWidget(page_index, widget)
 
     @property
-    def tabs(self):
-        return self._tabs
+    def activity_bar(self):
+        return self._activity_bar
+
+    @property
+    def pages(self):
+        return self._pages
 
     def closeEvent(self, event):
         self.closed.emit()

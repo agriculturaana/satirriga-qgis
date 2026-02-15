@@ -1,4 +1,8 @@
-"""Aba de sessao — detalhes do usuario logado + logout."""
+"""DEPRECATED: Logica migrada para session_popup.py e session_header.py.
+
+Aba de sessao — detalhes do usuario logado + logout.
+Mantido apenas para referencia. Nao e mais importado pelo plugin.
+"""
 
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import (

@@ -1,9 +1,11 @@
-"""Header de sessao — exibe usuario logado ou botao de login."""
+"""Header de sessao — exibe usuario logado (clicavel -> popup) ou botao de login."""
 
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
 )
+
+from .session_popup import SessionPopup
 
 
 class SessionHeader(QWidget):
@@ -14,6 +16,7 @@ class SessionHeader(QWidget):
         self._state = state
         self._auth = auth_controller
         self._countdown_secs = 0
+        self._popup = None
 
         self._build_ui()
         self._connect_signals()
@@ -27,30 +30,31 @@ class SessionHeader(QWidget):
         # Login button
         self._login_btn = QPushButton("Entrar")
         self._login_btn.setFixedHeight(24)
+        self._login_btn.setCursor(Qt.PointingHandCursor)
         self._login_btn.setStyleSheet(
             "QPushButton { background-color: #1976D2; color: white; "
-            "border-radius: 4px; padding: 2px 12px; font-size: 11px; }"
+            "border-radius: 4px; padding: 2px 12px; font-size: 11px; border: none; }"
             "QPushButton:hover { background-color: #1565C0; }"
         )
         self._login_btn.clicked.connect(self._on_login_clicked)
         layout.addWidget(self._login_btn)
 
-        # User display (hidden when not authenticated)
-        self._user_widget = QWidget()
-        user_layout = QHBoxLayout()
-        user_layout.setContentsMargins(0, 0, 0, 0)
-        user_layout.setSpacing(4)
+        # User button (clicavel -> abre popup)
+        self._user_btn = QPushButton()
+        self._user_btn.setFixedHeight(24)
+        self._user_btn.setCursor(Qt.PointingHandCursor)
+        self._user_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; "
+            "font-size: 11px; font-weight: bold; padding: 2px 4px; }"
+            "QPushButton:hover { color: #1976D2; }"
+        )
+        self._user_btn.clicked.connect(self._on_user_clicked)
+        layout.addWidget(self._user_btn)
 
-        self._user_label = QLabel()
-        self._user_label.setStyleSheet("font-size: 11px; font-weight: bold;")
-        user_layout.addWidget(self._user_label)
-
+        # Countdown label
         self._countdown_label = QLabel()
-        self._countdown_label.setStyleSheet("font-size: 10px; color: #757575;")
-        user_layout.addWidget(self._countdown_label)
-
-        self._user_widget.setLayout(user_layout)
-        layout.addWidget(self._user_widget)
+        self._countdown_label.setStyleSheet("font-size: 10px; border: none;")
+        layout.addWidget(self._countdown_label)
 
         self.setLayout(layout)
 
@@ -63,12 +67,16 @@ class SessionHeader(QWidget):
     def _update_display(self):
         is_auth = self._state.is_authenticated
         self._login_btn.setVisible(not is_auth)
-        self._user_widget.setVisible(is_auth)
+        self._user_btn.setVisible(is_auth)
+        self._countdown_label.setVisible(is_auth)
+
+        if not is_auth and self._popup and self._popup.isVisible():
+            self._popup.hide()
 
     def _on_user_changed(self, user):
         if user:
             display = user.name or user.email or "Usuario"
-            self._user_label.setText(display)
+            self._user_btn.setText(f"{display} \u25BE")
         self._update_display()
 
     def _on_countdown(self, seconds):
@@ -78,11 +86,11 @@ class SessionHeader(QWidget):
         self._countdown_label.setText(f"[{mins}:{secs:02d}]")
 
         if seconds < 60:
-            self._countdown_label.setStyleSheet("font-size: 10px; color: #F44336;")
+            self._countdown_label.setStyleSheet("font-size: 10px; color: #F44336; border: none;")
         elif seconds < 300:
-            self._countdown_label.setStyleSheet("font-size: 10px; color: #FF9800;")
+            self._countdown_label.setStyleSheet("font-size: 10px; color: #FF9800; border: none;")
         else:
-            self._countdown_label.setStyleSheet("font-size: 10px; color: #757575;")
+            self._countdown_label.setStyleSheet("font-size: 10px; border: none;")
 
     def _on_loading(self, operation, is_loading):
         if operation == "auth":
@@ -91,3 +99,16 @@ class SessionHeader(QWidget):
 
     def _on_login_clicked(self):
         self._auth.start_login()
+
+    def _on_user_clicked(self):
+        """Abre/fecha popup de sessao ao clicar no usuario."""
+        if self._popup is None:
+            self._popup = SessionPopup(
+                state=self._state,
+                auth_controller=self._auth,
+            )
+
+        if self._popup.isVisible():
+            self._popup.hide()
+        else:
+            self._popup.show_below(self._user_btn)
