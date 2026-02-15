@@ -37,8 +37,15 @@ class HttpClient(QObject):
         if content_type:
             req.setRawHeader(b"Content-Type", content_type.encode("utf-8"))
 
+        has_token = False
         if self._interceptor:
             req = self._interceptor.intercept(req)
+            has_token = bool(req.rawHeader(b"Authorization"))
+
+        QgsMessageLog.logMessage(
+            f"[HTTP] {method} {url} (auth={has_token})",
+            PLUGIN_NAME, Qgis.Info,
+        )
 
         if method == "GET":
             reply = self._nam.get(req)
@@ -53,6 +60,9 @@ class HttpClient(QObject):
             return request_id
 
         self._pending[request_id] = reply
+        # Guarda URL para log na resposta
+        self._request_urls = getattr(self, "_request_urls", {})
+        self._request_urls[request_id] = url
         reply.finished.connect(lambda: self._on_finished(request_id, reply))
 
         return request_id
@@ -60,6 +70,7 @@ class HttpClient(QObject):
     def _on_finished(self, request_id: str, reply):
         """Processa resposta do NAM."""
         self._pending.pop(request_id, None)
+        req_url = getattr(self, "_request_urls", {}).pop(request_id, "?")
 
         error = reply.error()
         status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
@@ -71,19 +82,28 @@ class HttpClient(QObject):
         reply.deleteLater()
 
         if error and status_code == 0:
-            self.request_error.emit(request_id, f"Erro de rede: {reply.errorString()}")
+            error_msg = reply.errorString()
+            QgsMessageLog.logMessage(
+                f"[HTTP] ERRO DE REDE {req_url} -> {error_msg}",
+                PLUGIN_NAME, Qgis.Warning,
+            )
+            self.request_error.emit(request_id, f"Erro de rede: {error_msg}")
             return
 
         if 200 <= status_code < 300:
+            QgsMessageLog.logMessage(
+                f"[HTTP] {status_code} {req_url} ({len(body)} bytes)",
+                PLUGIN_NAME, Qgis.Info,
+            )
             self.request_finished.emit(request_id, status_code, body)
         else:
             api_error = normalize_error(status_code, body)
+            body_preview = body[:500].decode("utf-8", errors="replace") if body else ""
+            QgsMessageLog.logMessage(
+                f"[HTTP] {status_code} {req_url} -> {api_error.message}\n{body_preview}",
+                PLUGIN_NAME, Qgis.Warning,
+            )
             self.request_error.emit(request_id, api_error.message)
-
-            if api_error.is_auth_error:
-                QgsMessageLog.logMessage(
-                    f"Auth error ({status_code})", PLUGIN_NAME, Qgis.Warning
-                )
 
     # ----------------------------------------------------------------
     # Public API

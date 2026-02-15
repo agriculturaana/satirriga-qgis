@@ -1,6 +1,9 @@
 from urllib.parse import urlparse
 
 from qgis.PyQt.QtNetwork import QNetworkRequest
+from qgis.core import QgsMessageLog, Qgis
+
+from ..config.settings import PLUGIN_NAME
 
 
 class AuthInterceptor:
@@ -16,6 +19,10 @@ class AuthInterceptor:
 
     def update_allowed_hosts(self, hosts):
         self._allowed_hosts = set(hosts)
+        QgsMessageLog.logMessage(
+            f"[Auth] Hosts autorizados: {hosts}",
+            PLUGIN_NAME, Qgis.Info,
+        )
 
     def intercept(self, request: QNetworkRequest) -> QNetworkRequest:
         """Adiciona header Authorization se host e permitido."""
@@ -23,6 +30,10 @@ class AuthInterceptor:
         host = urlparse(url).hostname
 
         if host not in self._allowed_hosts:
+            QgsMessageLog.logMessage(
+                f"[Auth] Host '{host}' nao autorizado (permitidos: {self._allowed_hosts})",
+                PLUGIN_NAME, Qgis.Warning,
+            )
             return request
 
         token = self._token_provider()
@@ -30,6 +41,11 @@ class AuthInterceptor:
             request.setRawHeader(
                 b"Authorization",
                 f"Bearer {token}".encode("utf-8"),
+            )
+        else:
+            QgsMessageLog.logMessage(
+                f"[Auth] Token nulo para {host} — request sem autorizacao",
+                PLUGIN_NAME, Qgis.Warning,
             )
 
         return request
