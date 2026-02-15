@@ -70,7 +70,8 @@ class MapeamentoController(QObject):
 
         page_size = self._config.get("page_size")
         params = (
-            f"?page={self._current_page}"
+            f"?includeGeom=false"
+            f"&page={self._current_page}"
             f"&size={page_size}"
             f"&sortField={self._current_sort_field}"
             f"&sortOrder={self._current_sort_order}"
@@ -123,11 +124,21 @@ class MapeamentoController(QObject):
             self._state.set_loading("mapeamentos", False)
             try:
                 data = json.loads(body)
+                QgsMessageLog.logMessage(
+                    f"[Mapeamentos] JSON keys: {list(data.keys())}, "
+                    f"content items: {len(data.get('content', []))}",
+                    PLUGIN_NAME, Qgis.Info,
+                )
                 result = parse_paginated_result(data)
+                QgsMessageLog.logMessage(
+                    f"[Mapeamentos] Parsed: {len(result.content)} mapeamentos, "
+                    f"page={result.page}, totalPages={result.total_pages}",
+                    PLUGIN_NAME, Qgis.Info,
+                )
                 self._state.mapeamentos = result
             except Exception as e:
                 QgsMessageLog.logMessage(
-                    f"Erro ao parsear mapeamentos: {e}",
+                    f"Erro ao parsear mapeamentos: {e}\nBody: {body[:500]}",
                     PLUGIN_NAME, Qgis.Warning,
                 )
                 self._state.set_error("mapeamentos", f"Erro ao processar dados: {e}")

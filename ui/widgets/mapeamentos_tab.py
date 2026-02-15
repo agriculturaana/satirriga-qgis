@@ -8,7 +8,10 @@ from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QFrame,
 )
 
+from qgis.core import QgsMessageLog, Qgis
+
 from ...domain.models.enums import JobStatusEnum
+from ...infra.config.settings import PLUGIN_NAME
 
 
 class MapeamentosTab(QWidget):
@@ -18,7 +21,6 @@ class MapeamentosTab(QWidget):
     _SORT_FIELDS = {
         0: "descricao",
         1: "dataReferencia",
-        2: "status",
     }
 
     def __init__(self, state, mapeamento_controller, parent=None):
@@ -33,6 +35,10 @@ class MapeamentosTab(QWidget):
 
         self._build_ui()
         self._connect_signals()
+
+        # Carrega mapeamentos se ja estiver autenticado (ex: sessao restaurada)
+        if self._state.is_authenticated:
+            self._controller.load_mapeamentos(page=0)
 
     def _build_ui(self):
         layout = QVBoxLayout()
@@ -54,7 +60,7 @@ class MapeamentosTab(QWidget):
         # Tabela
         self._table = QTableWidget()
         self._table.setColumnCount(3)
-        self._table.setHorizontalHeaderLabels(["Descricao", "Data Ref.", "Status"])
+        self._table.setHorizontalHeaderLabels(["Descricao", "Data Ref.", "Autor"])
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
@@ -88,7 +94,7 @@ class MapeamentosTab(QWidget):
         # Loading / error feedback
         self._status_label = QLabel()
         self._status_label.setAlignment(Qt.AlignCenter)
-        self._status_label.setStyleSheet("color: #757575; font-size: 11px;")
+        self._status_label.setStyleSheet("font-size: 11px;")
         self._status_label.setVisible(False)
         layout.addWidget(self._status_label)
 
@@ -198,8 +204,17 @@ class MapeamentosTab(QWidget):
 
     def _on_mapeamentos_changed(self, result):
         if result is None:
+            QgsMessageLog.logMessage(
+                "[MapeamentosTab] Signal recebido mas result=None",
+                PLUGIN_NAME, Qgis.Warning,
+            )
             return
 
+        QgsMessageLog.logMessage(
+            f"[MapeamentosTab] Signal recebido: {len(result.content)} items, "
+            f"page={result.page}/{result.total_pages}",
+            PLUGIN_NAME, Qgis.Info,
+        )
         self._table.setRowCount(0)
         self._table.setRowCount(len(result.content))
 
@@ -210,15 +225,8 @@ class MapeamentosTab(QWidget):
             # Data Referencia
             self._table.setItem(i, 1, QTableWidgetItem(m.data_referencia))
 
-            # Status chip
-            status_item = QTableWidgetItem(m.status)
-            try:
-                status_enum = JobStatusEnum(m.status)
-                status_item.setText(status_enum.label)
-                status_item.setForeground(QColor(status_enum.color))
-            except ValueError:
-                pass
-            self._table.setItem(i, 2, status_item)
+            # Autor
+            self._table.setItem(i, 2, QTableWidgetItem(m.user_name or "-"))
 
         # Paginacao
         page = result.page + 1
@@ -324,7 +332,7 @@ class MapeamentosTab(QWidget):
             self._refresh_btn.setEnabled(not is_loading)
             if is_loading:
                 self._status_label.setText("Carregando...")
-                self._status_label.setStyleSheet("color: #757575; font-size: 11px;")
+                self._status_label.setStyleSheet("font-size: 11px;")
                 self._status_label.setVisible(True)
             else:
                 self._status_label.setVisible(False)
