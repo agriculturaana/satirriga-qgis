@@ -1,12 +1,12 @@
 [general]
 name=SatIrriga QGIS
 qgisMinimumVersion=3.22
-description=Consulte, baixe, edite e envie mapeamentos de irrigacao do SatIrriga direto no QGIS.
+description=QGIS client for the SatIrriga platform (ANA/INPE). Browse, download, edit, and submit satellite-based irrigation maps.
 version=2.0.0
 author=Tharles de Sousa Andrade | ANA | INPE
 email=irtharles@gmail.com
 
-about=Acesse o SatIrriga sem sair do QGIS. Faca login seguro (SSO), navegue pelos mapeamentos, baixe classificacoes como GeoPackage editavel, ajuste geometrias com as ferramentas do QGIS e envie as alteracoes de volta ao servidor.
+about=SatIrriga QGIS is the official desktop client for the SatIrriga platform, a satellite-based irrigation monitoring system developed jointly by ANA (Brazil's National Water and Sanitation Agency) and INPE (Brazil's National Institute for Space Research). The plugin enables a complete field-validation workflow without leaving the QGIS environment: authenticate securely via Single Sign-On (OIDC/PKCE through Keycloak); browse and query irrigation mapping campaigns; download classification layers as editable GeoPackage files; refine geometries using the full suite of QGIS sketching and editing tools; and submit the revised data back to the SatIrriga server. Designed for analysts and technicians who review remote-sensing-derived irrigation maps, the plugin streamlines the review-and-correction cycle that is central to the SatIrriga quality-assurance process.
 
 tracker=https://github.com/agriculturaana/satirriga-qgis/issues
 repository=https://github.com/agriculturaana/satirriga-qgis
