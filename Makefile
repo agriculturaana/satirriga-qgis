@@ -87,11 +87,11 @@ deploy: compile
 
 test: compile
 	@echo "Executando testes..."
-	python -m pytest tests/ -v --tb=short
+	python3 -m pytest tests/ -v --tb=short
 
 test-unit: compile
 	@echo "Executando testes unitarios..."
-	python -m pytest tests/unit/ -v --tb=short
+	python3 -m pytest tests/unit/ -v --tb=short
 
 clean:
 	@echo "Limpando arquivos gerados..."
