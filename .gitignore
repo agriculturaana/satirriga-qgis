@@ -169,5 +169,6 @@ config.json
 *.md
 !LICENSE.md
 !README.md
+!README_EN.md
 *.zip
 
