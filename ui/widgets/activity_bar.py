@@ -165,5 +165,13 @@ class ActivityBar(QWidget):
             return self._buttons[index]
         return None
 
+    def select_page(self, page_index):
+        """Seleciona botao por page_index programaticamente."""
+        for btn in self._buttons:
+            if btn.page_index == page_index:
+                btn.setChecked(True)
+                self.page_changed.emit(page_index)
+                return
+
     def _on_button_clicked(self, button):
         self.page_changed.emit(button.page_index)

@@ -20,10 +20,11 @@ class SatIrrigaDock(QDockWidget):
     closed = pyqtSignal()
 
     # Indices das paginas
-    PAGE_MAPEAMENTOS = 0
-    PAGE_CAMADAS = 1
-    PAGE_CONFIG = 2
-    PAGE_LOGS = 3
+    PAGE_HOME = 0
+    PAGE_MAPEAMENTOS = 1
+    PAGE_CAMADAS = 2
+    PAGE_CONFIG = 3
+    PAGE_LOGS = 4
 
     def __init__(self, state, config_repo, parent=None):
         super().__init__(parent)
@@ -65,7 +66,7 @@ class SatIrrigaDock(QDockWidget):
         self._pages.setStyleSheet("")
 
         # Placeholders (serao substituidos via set_page_widget)
-        for label_text in ("Mapeamentos (requer login)", "Camadas locais",
+        for label_text in ("Home", "Mapeamentos (requer login)", "Camadas locais",
                            "Configuracoes", "Logs"):
             placeholder = QLabel(label_text)
             placeholder.setAlignment(Qt.AlignCenter)
@@ -129,6 +130,7 @@ class SatIrrigaDock(QDockWidget):
 
     def _setup_nav_buttons(self):
         """Cria botoes de navegacao na Activity Bar."""
+        self._activity_bar.add_button("nav_home", "Home", self.PAGE_HOME)
         self._activity_bar.add_button("nav_mapeamentos", "Mapeamentos", self.PAGE_MAPEAMENTOS)
         self._activity_bar.add_button("nav_camadas", "Camadas", self.PAGE_CAMADAS)
         self._activity_bar.add_stretch()
@@ -140,9 +142,17 @@ class SatIrrigaDock(QDockWidget):
         self._state.auth_state_changed.connect(self._on_auth_changed)
         self._state.user_changed.connect(self._on_user_changed)
 
+    def navigate_to(self, page_index):
+        """Navega para uma pagina programaticamente (atualiza bar + stack)."""
+        self._activity_bar.select_page(page_index)
+
     def _on_auth_changed(self, is_authenticated):
-        if isinstance(self._user_label, QLabel) and not is_authenticated:
-            self._user_label.setText("Nao autenticado")
+        if is_authenticated:
+            self.navigate_to(self.PAGE_MAPEAMENTOS)
+        else:
+            self.navigate_to(self.PAGE_HOME)
+            if isinstance(self._user_label, QLabel):
+                self._user_label.setText("Nao autenticado")
 
     def _on_user_changed(self, user):
         if not isinstance(self._user_label, QLabel):

@@ -19,6 +19,7 @@ from .ui.widgets.mapeamentos_tab import MapeamentosTab
 from .ui.widgets.camadas_tab import CamadasTab
 from .ui.widgets.config_tab import ConfigTab
 from .ui.widgets.logs_tab import LogsTab
+from .ui.widgets.home_tab import HomeTab
 from .app.controllers.config_controller import ConfigController
 
 
@@ -177,25 +178,29 @@ class SatIrrigaPlugin:
         old_label.deleteLater()
         self.dock._user_label = session_header
 
-        # Mapeamentos: page 0
+        # Home: page 0
+        home_tab = HomeTab()
+        self.dock.set_page_widget(SatIrrigaDock.PAGE_HOME, home_tab)
+
+        # Mapeamentos: page 1
         mapeamentos_tab = MapeamentosTab(
             state=self._state,
             mapeamento_controller=self._mapeamento_controller,
         )
         self.dock.set_page_widget(SatIrrigaDock.PAGE_MAPEAMENTOS, mapeamentos_tab)
 
-        # Camadas: page 1
+        # Camadas: page 2
         camadas_tab = CamadasTab(
             state=self._state,
             mapeamento_controller=self._mapeamento_controller,
         )
         self.dock.set_page_widget(SatIrrigaDock.PAGE_CAMADAS, camadas_tab)
 
-        # Config: page 2
+        # Config: page 3
         config_tab = ConfigTab(config_controller=self._config_controller)
         self.dock.set_page_widget(SatIrrigaDock.PAGE_CONFIG, config_tab)
 
-        # Logs: page 3
+        # Logs: page 4
         logs_tab = LogsTab()
         self.dock.set_page_widget(SatIrrigaDock.PAGE_LOGS, logs_tab)
 
@@ -209,9 +214,12 @@ class SatIrrigaPlugin:
         # Badge de camadas modificadas
         self._connect_camadas_badge(camadas_tab)
 
+        # Garante que Home e a pagina inicial apos o wiring
+        self.dock.navigate_to(SatIrrigaDock.PAGE_HOME)
+
     def _connect_camadas_badge(self, camadas_tab):
         """Atualiza badge na NavButton de Camadas quando ha features modificadas."""
-        camadas_btn = self.dock.activity_bar.button_at(1)  # index 1 = Camadas
+        camadas_btn = self.dock.activity_bar.button_at(2)  # index 2 = Camadas
         if not camadas_btn:
             return
 
