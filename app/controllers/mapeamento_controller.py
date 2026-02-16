@@ -71,7 +71,7 @@ class MapeamentoController(QObject):
         page_size = self._config.get("page_size")
         params = (
             f"?includeGeom=false"
-            f"&page={self._current_page}"
+            f"&page={self._current_page + 1}"
             f"&size={page_size}"
             f"&sortField={self._current_sort_field}"
             f"&sortOrder={self._current_sort_order}"
