@@ -67,7 +67,7 @@ class TestMapeamentosParsing:
         m = result.content[0]
         assert m.id == 1
         assert m.descricao == "Mapeamento Cerrado 2024"
-        assert m.data_referencia == "2024-01-15"
+        assert m.data_referencia == "15/01/2024"
         assert m.status == "DONE"
         assert m.satelite == "Sentinel-2"
         assert len(m.metodos) == 2

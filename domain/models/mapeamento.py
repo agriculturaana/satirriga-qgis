@@ -91,9 +91,14 @@ class PaginatedResult:
         # Paginação pode estar em "pagination" (aninhado) ou no root
         pagination = data.get("pagination", data)
 
+        # pagination.page da API e 1-indexed; normaliza para 0-indexed
+        raw_page = pagination.get("page", data.get("number", 0))
+        if "pagination" in data:
+            raw_page = max(raw_page - 1, 0)
+
         return cls(
             content=content,
-            page=pagination.get("page", data.get("number", 0)),
+            page=raw_page,
             size=pagination.get("size", 15),
             total_elements=pagination.get("total", data.get("totalElements", 0)),
             total_pages=pagination.get("totalPages", 0),

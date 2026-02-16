@@ -100,7 +100,7 @@ class TestMapeamento:
         m = Mapeamento.from_dict(data)
         assert m.id == 42
         assert m.descricao == "Mapeamento Teste"
-        assert m.data_referencia == "2024-01-15"
+        assert m.data_referencia == "15/01/2024"
         assert m.satelite == "Sentinel-2"
         assert len(m.metodos) == 1
         assert m.metodos[0].metodo_apply == "RANDOM_FOREST"
@@ -112,7 +112,7 @@ class TestMapeamento:
 
 
 class TestPaginatedResult:
-    def test_from_dict(self):
+    def test_from_dict_spring_format(self):
         data = {
             "content": [
                 {"id": 1, "descricao": "M1", "dataReferencia": "2024-01-01", "status": "DONE"},
@@ -128,6 +128,37 @@ class TestPaginatedResult:
         assert result.page == 0
         assert result.total_elements == 50
         assert result.total_pages == 4
+
+    def test_from_dict_api_pagination_1indexed(self):
+        """API retorna pagination.page 1-indexed; model normaliza para 0-indexed."""
+        data = {
+            "data": [
+                {"id": 1, "descricao": "M1", "dataReferencia": "2024-01-01", "status": "DONE"},
+            ],
+            "pagination": {
+                "page": 1,
+                "size": 15,
+                "total": 50,
+                "totalPages": 4,
+            },
+        }
+        result = PaginatedResult.from_dict(data)
+        assert result.page == 0
+        assert result.total_elements == 50
+        assert result.total_pages == 4
+
+    def test_from_dict_api_pagination_page3(self):
+        data = {
+            "data": [],
+            "pagination": {
+                "page": 3,
+                "size": 15,
+                "total": 50,
+                "totalPages": 4,
+            },
+        }
+        result = PaginatedResult.from_dict(data)
+        assert result.page == 2
 
 
 class TestMetodo:
