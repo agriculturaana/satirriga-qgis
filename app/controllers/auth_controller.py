@@ -43,6 +43,9 @@ class AuthController(QObject):
             self._config.get("sso_client_id"),
         )
 
+    def _get_resource_id(self):
+        return self._config.get("sso_resource_id")
+
     def _token_endpoint(self):
         sso_url, realm, _ = self._get_sso_config()
         return f"{sso_url}/realms/{realm}/protocol/openid-connect/token"
@@ -92,7 +95,7 @@ class AuthController(QObject):
             try:
                 token_data = json.loads(body)
                 claims = self._token_store.store_tokens(token_data)
-                user = UserInfo.from_jwt_claims(claims)
+                user = UserInfo.from_jwt_claims(claims, self._get_resource_id())
 
                 self._start_session_manager()
 
@@ -146,7 +149,7 @@ class AuthController(QObject):
         # Atualiza claims (podem ter mudado no refresh)
         claims = TokenStore._decode_jwt_payload(self._token_store.access_token)
         if claims:
-            user = UserInfo.from_jwt_claims(claims)
+            user = UserInfo.from_jwt_claims(claims, self._get_resource_id())
             self._state.user = user
 
     # ----------------------------------------------------------------
@@ -175,7 +178,7 @@ class AuthController(QObject):
     def _on_restore_result(self, success):
         if success:
             claims = TokenStore._decode_jwt_payload(self._token_store.access_token)
-            user = UserInfo.from_jwt_claims(claims)
+            user = UserInfo.from_jwt_claims(claims, self._get_resource_id())
             self._state.user = user
             self._state.is_authenticated = True
             QgsMessageLog.logMessage(

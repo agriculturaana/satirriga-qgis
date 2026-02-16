@@ -21,27 +21,63 @@ class TestJobStatusEnum:
 
 
 class TestUserInfo:
-    def test_from_jwt_claims(self):
+    def test_from_jwt_claims_with_resource_access(self):
         claims = {
             "sub": "user-123",
             "name": "Tharles Andrade",
             "email": "tharles@example.com",
             "preferred_username": "tharles",
             "exp": 1700000000,
-            "realm_access": {"roles": ["user", "admin"]},
+            "realm_access": {"roles": ["planet-tiles", "planet-mosaicos"]},
+            "resource_access": {
+                "sat-irriga": {
+                    "roles": ["acesso", "homologar", "gerenciar-mascaras"]
+                },
+                "account": {
+                    "roles": ["manage-account"]
+                },
+            },
         }
-        user = UserInfo.from_jwt_claims(claims)
+        user = UserInfo.from_jwt_claims(claims, resource_id="sat-irriga")
         assert user.sub == "user-123"
         assert user.name == "Tharles Andrade"
         assert user.email == "tharles@example.com"
-        assert user.roles == ["user", "admin"]
+        assert user.roles == ["acesso", "homologar", "gerenciar-mascaras"]
+        assert user.realm_roles == ["planet-tiles", "planet-mosaicos"]
         assert user.token_exp == 1700000000
+
+    def test_from_jwt_claims_without_resource_id(self):
+        claims = {
+            "sub": "user-456",
+            "name": "Test User",
+            "email": "test@example.com",
+            "realm_access": {"roles": ["user", "admin"]},
+            "resource_access": {
+                "sat-irriga": {"roles": ["acesso"]},
+            },
+        }
+        user = UserInfo.from_jwt_claims(claims)
+        assert user.roles == []
+        assert user.realm_roles == ["user", "admin"]
+
+    def test_from_jwt_claims_unknown_resource_id(self):
+        claims = {
+            "sub": "user-789",
+            "name": "Test",
+            "email": "t@example.com",
+            "resource_access": {
+                "sat-irriga": {"roles": ["acesso"]},
+            },
+        }
+        user = UserInfo.from_jwt_claims(claims, resource_id="outro-sistema")
+        assert user.roles == []
 
     def test_from_jwt_claims_minimal(self):
         user = UserInfo.from_jwt_claims({})
         assert user.sub == ""
         assert user.name == ""
         assert user.roles == []
+        assert user.realm_roles == []
 
 
 class TestMapeamento:

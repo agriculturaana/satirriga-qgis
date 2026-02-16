@@ -8,18 +8,25 @@ class UserInfo:
     name: str
     email: str
     roles: List[str] = field(default_factory=list)
+    realm_roles: List[str] = field(default_factory=list)
     preferred_username: Optional[str] = None
     token_exp: Optional[int] = None
 
     @classmethod
-    def from_jwt_claims(cls, claims: dict) -> "UserInfo":
-        realm_access = claims.get("realm_access", {})
-        roles = realm_access.get("roles", [])
+    def from_jwt_claims(cls, claims: dict, resource_id: Optional[str] = None) -> "UserInfo":
+        realm_roles = claims.get("realm_access", {}).get("roles", [])
+
+        client_roles = []
+        if resource_id:
+            resource_access = claims.get("resource_access", {})
+            client_roles = resource_access.get(resource_id, {}).get("roles", [])
+
         return cls(
             sub=claims.get("sub", ""),
             name=claims.get("name", ""),
             email=claims.get("email", ""),
-            roles=roles,
+            roles=client_roles,
+            realm_roles=realm_roles,
             preferred_username=claims.get("preferred_username"),
             token_exp=claims.get("exp"),
         )
