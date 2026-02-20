@@ -21,6 +21,7 @@ from .ui.widgets.config_tab import ConfigTab
 from .ui.widgets.logs_tab import LogsTab
 from .ui.widgets.home_tab import HomeTab
 from .app.controllers.config_controller import ConfigController
+from .app.controllers.attribute_controller import AttributeEditController
 
 
 class SatIrrigaPlugin:
@@ -47,6 +48,7 @@ class SatIrrigaPlugin:
         self.toolbar.setObjectName("SatIrrigaToolbar")
         self.plugin_is_active = False
         self.dock = None
+        self._attribute_controller = None
 
         # DI: shared objects
         self._config_repo = ConfigRepository()
@@ -139,6 +141,10 @@ class SatIrrigaPlugin:
             del self.toolbar
 
         # Cleanup controllers
+        if self._attribute_controller:
+            self._attribute_controller.cleanup()
+            self._attribute_controller = None
+
         if self._auth_controller:
             self._auth_controller.cleanup()
 
@@ -229,6 +235,12 @@ class SatIrrigaPlugin:
 
         # Badge de camadas modificadas
         self._connect_camadas_badge(camadas_tab)
+
+        # Attribute edit: abre dialog ao selecionar 1 feature SatIrriga
+        self._attribute_controller = AttributeEditController(
+            canvas=self.iface.mapCanvas(),
+            parent=self.dock,
+        )
 
         # Garante que Home e a pagina inicial apos o wiring
         self.dock.navigate_to(SatIrrigaDock.PAGE_HOME)

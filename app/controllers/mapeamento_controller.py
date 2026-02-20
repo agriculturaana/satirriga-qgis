@@ -2,7 +2,7 @@
 
 import json
 
-from qgis.PyQt.QtCore import QObject, pyqtSignal
+from qgis.PyQt.QtCore import QObject, QTimer, pyqtSignal
 from qgis.core import QgsApplication, QgsVectorLayer, QgsMessageLog, Qgis
 
 from ...infra.config.settings import PLUGIN_NAME
@@ -18,6 +18,7 @@ class MapeamentoController(QObject):
     zonal_upload_completed = pyqtSignal(str, int)    # gpkg_path, zonal_id
     upload_progress = pyqtSignal(dict)               # UploadBatchStatus dict
     conflict_detected = pyqtSignal(str)              # batchUuid
+    edit_tracking_done = pyqtSignal()                # apos marcar features editadas
 
     def __init__(self, state: AppState, http_client: HttpClient,
                  config_repo, token_provider=None, parent=None):
@@ -39,6 +40,11 @@ class MapeamentoController(QObject):
     def _api_url(self, path):
         base = self._config.get("api_base_url").rstrip("/")
         return f"{base}{path}"
+
+    def get_gpkg_base_dir(self):
+        """Retorna diretorio base para GPKGs, respeitando configuracao."""
+        from ...domain.services.gpkg_service import gpkg_base_dir
+        return gpkg_base_dir(self._config.get("gpkg_base_dir"))
 
     # ----------------------------------------------------------------
     # Catalogo Zonal (V2)
@@ -233,7 +239,7 @@ class MapeamentoController(QObject):
         ]
 
     def _mark_uploaded(self, gpkg_path):
-        """Marca features MODIFIED/NEW como UPLOADED no GPKG."""
+        """Marca features MODIFIED/NEW como UPLOADED no GPKG via dataProvider batch."""
         from ...domain.models.enums import SyncStatusEnum
         from datetime import datetime, timezone
 
@@ -247,14 +253,17 @@ class MapeamentoController(QObject):
             return
 
         now_iso = datetime.now(timezone.utc).isoformat()
-        layer.startEditing()
+        attr_changes = {}
         for feat in layer.getFeatures():
             status = feat.attribute(sync_idx)
             if status in (SyncStatusEnum.MODIFIED.value, SyncStatusEnum.NEW.value):
-                layer.changeAttributeValue(feat.id(), sync_idx, SyncStatusEnum.UPLOADED.value)
+                changes = {sync_idx: SyncStatusEnum.UPLOADED.value}
                 if ts_idx >= 0:
-                    layer.changeAttributeValue(feat.id(), ts_idx, now_iso)
-        layer.commitChanges()
+                    changes[ts_idx] = now_iso
+                attr_changes[feat.id()] = changes
+
+        if attr_changes:
+            layer.dataProvider().changeAttributeValues(attr_changes)
 
     # ----------------------------------------------------------------
     # Edit tracking
@@ -274,7 +283,7 @@ class MapeamentoController(QObject):
             lambda: self._capture_edited_fids(layer)
         )
         layer.afterCommitChanges.connect(
-            lambda: self._mark_edited_features(layer)
+            lambda: QTimer.singleShot(0, lambda: self._mark_edited_features(layer))
         )
 
     def _capture_edited_fids(self, layer):
@@ -295,12 +304,18 @@ class MapeamentoController(QObject):
         }
 
     def _mark_edited_features(self, layer):
-        """Marca features editadas como MODIFIED e novas como NEW no GPKG."""
+        """Marca features editadas como MODIFIED e novas como NEW no GPKG.
+
+        Usa dataProvider().changeAttributeValues() para batch direto no GPKG,
+        sem startEditing/commitChanges (evita loop de signals e e O(1) no provider).
+        """
         from ...domain.models.enums import SyncStatusEnum
         from datetime import datetime, timezone
 
         layer_id = layer.id()
-        fid_data = self._pending_edit_fids.get(layer_id, {"changed": set(), "added": set()})
+        fid_data = self._pending_edit_fids.pop(layer_id, None)
+        if not fid_data:
+            return
         changed_fids = fid_data.get("changed", set())
         added_fids = fid_data.get("added", set())
 
@@ -313,7 +328,11 @@ class MapeamentoController(QObject):
             return
 
         now_iso = datetime.now(timezone.utc).isoformat()
-        layer.startEditing()
+
+        # Batch: {fid: {field_idx: new_value, ...}, ...}
+        attr_changes = {}
+        modified_count = 0
+        new_count = 0
 
         for fid in changed_fids:
             if fid in added_fids:
@@ -324,25 +343,30 @@ class MapeamentoController(QObject):
             current_status = feat.attribute(sync_idx)
             if current_status in (SyncStatusEnum.DOWNLOADED.value,
                                   SyncStatusEnum.MODIFIED.value):
-                layer.changeAttributeValue(fid, sync_idx, SyncStatusEnum.MODIFIED.value)
+                changes = {sync_idx: SyncStatusEnum.MODIFIED.value}
                 if ts_idx >= 0:
-                    layer.changeAttributeValue(fid, ts_idx, now_iso)
+                    changes[ts_idx] = now_iso
+                attr_changes[fid] = changes
+                modified_count += 1
 
         for fid in added_fids:
             feat = layer.getFeature(fid)
             if not feat.isValid():
                 continue
-            layer.changeAttributeValue(fid, sync_idx, SyncStatusEnum.NEW.value)
+            changes = {sync_idx: SyncStatusEnum.NEW.value}
             if ts_idx >= 0:
-                layer.changeAttributeValue(fid, ts_idx, now_iso)
+                changes[ts_idx] = now_iso
+            attr_changes[fid] = changes
+            new_count += 1
 
-        layer.commitChanges()
+        if attr_changes:
+            layer.dataProvider().changeAttributeValues(attr_changes)
+            layer.triggerRepaint()
 
-        total = len(changed_fids - added_fids) + len(added_fids)
         self._pending_edit_fids[layer_id] = {"changed": set(), "added": set()}
 
         QgsMessageLog.logMessage(
-            f"Edit tracking: {len(changed_fids - added_fids)} MODIFIED, "
-            f"{len(added_fids)} NEW",
+            f"Edit tracking: {modified_count} MODIFIED, {new_count} NEW",
             PLUGIN_NAME, Qgis.Info,
         )
+        self.edit_tracking_done.emit()

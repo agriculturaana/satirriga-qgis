@@ -91,6 +91,7 @@ class CamadasTab(QWidget):
         self._controller.zonal_upload_completed.connect(
             lambda path, zid: self._on_zonal_upload_done()
         )
+        self._controller.edit_tracking_done.connect(self._refresh_list)
 
     def _on_auth_changed(self, is_authenticated):
         if is_authenticated:
@@ -133,11 +134,11 @@ class CamadasTab(QWidget):
     def _refresh_list(self):
         """Atualiza lista de GPKGs locais com status de sync."""
         from ...domain.services.gpkg_service import (
-            list_local_gpkgs, gpkg_base_dir, count_features_by_sync_status,
+            list_local_gpkgs, count_features_by_sync_status,
         )
 
         try:
-            base_dir = gpkg_base_dir()
+            base_dir = self._controller.get_gpkg_base_dir()
             raw_list = list_local_gpkgs(base_dir)
             for entry in raw_list:
                 entry["sync_counts"] = count_features_by_sync_status(entry["path"])
