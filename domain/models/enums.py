@@ -21,7 +21,7 @@ class JobStatusEnum(str, Enum):
         return {
             self.PENDING: "Pendente",
             self.PROCESSING: "Processando",
-            self.DONE: "Concluido",
+            self.DONE: "Concluído",
             self.FAILED: "Falhou",
         }.get(self, self.value)
 
@@ -63,11 +63,11 @@ class ZonalStatusEnum(str, Enum):
         return {
             self.CREATED: "Criado",
             self.PROCESSING: "Processando",
-            self.DONE: "Concluido",
+            self.DONE: "Concluído",
             self.FAILED: "Falhou",
             self.CONSOLIDATING: "Consolidando",
             self.CONSOLIDATED: "Consolidado",
-            self.CONSOLIDATION_FAILED: "Falha na consolidacao",
+            self.CONSOLIDATION_FAILED: "Falha na consolidação",
         }.get(self, self.value)
 
     @property
@@ -105,11 +105,11 @@ class UploadBatchStatusEnum(str, Enum):
             self.VALIDATING_STRUCTURE: "Validando estrutura",
             self.VALIDATING_SCHEMA: "Validando schema",
             self.VALIDATING_TOPOLOGY: "Validando topologia",
-            self.DIFFING: "Calculando diferencas",
+            self.DIFFING: "Calculando diferenças",
             self.CONFLICT_CHECKING: "Verificando conflitos",
             self.RECONCILING: "Reconciliando",
             self.PROMOTING: "Promovendo",
-            self.COMPLETED: "Concluido",
+            self.COMPLETED: "Concluído",
             self.FAILED: "Falhou",
             self.CANCELLED: "Cancelado",
         }.get(self, self.value)

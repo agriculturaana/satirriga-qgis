@@ -58,7 +58,7 @@ class CamadasTab(QWidget):
         self._table = QTableWidget()
         self._table.setColumnCount(4)
         self._table.setHorizontalHeaderLabels([
-            "Zonal", "Sync Status", "Tamanho", "Acoes"
+            "Zonal", "Status Sinc.", "Tamanho", "Ações"
         ])
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -229,7 +229,7 @@ class CamadasTab(QWidget):
         # Botao Abrir
         btn_open = QPushButton("Abrir")
         btn_open.setFixedWidth(50)
-        btn_open.setToolTip("Abrir GeoPackage como camada editavel no QGIS")
+        btn_open.setToolTip("Abrir GeoPackage como camada editável no QGIS")
         btn_open.setStyleSheet(
             "QPushButton { background-color: #1976D2; color: white; "
             "border: none; padding: 2px 6px; border-radius: 3px; font-size: 11px; }"
@@ -261,7 +261,7 @@ class CamadasTab(QWidget):
                 "QPushButton { background-color: #E0E0E0; color: #9E9E9E; "
                 "border: none; padding: 2px 6px; border-radius: 3px; font-size: 11px; }"
             )
-            btn_upload.setToolTip("Sem alteracoes para enviar")
+            btn_upload.setToolTip("Sem alterações para enviar")
 
         layout.addWidget(btn_upload)
 
@@ -324,8 +324,8 @@ class CamadasTab(QWidget):
         if modified_count > 0:
             reply = QMessageBox.question(
                 self,
-                "Confirmar remocao",
-                f"Este GPKG tem {modified_count} feature(s) editada(s) nao enviada(s).\n"
+                "Confirmar remoção",
+                f"Este GPKG tem {modified_count} feature(s) editada(s) não enviada(s).\n"
                 "Deseja remover mesmo assim?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,

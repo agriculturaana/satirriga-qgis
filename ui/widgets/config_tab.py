@@ -57,15 +57,15 @@ class ConfigTab(QWidget):
         gpkg_layout.addWidget(self._fields["gpkg_base_dir"])
         browse_btn = QPushButton("...")
         browse_btn.setFixedWidth(30)
-        browse_btn.setToolTip("Selecionar diretorio para armazenamento de GeoPackages")
+        browse_btn.setToolTip("Selecionar diretório para armazenamento de GeoPackages")
         browse_btn.clicked.connect(self._browse_gpkg_dir)
         gpkg_layout.addWidget(browse_btn)
-        form.addRow("Diretorio GPKG:", gpkg_layout)
+        form.addRow("Diretório GPKG:", gpkg_layout)
 
         # Page Size
         self._fields["page_size"] = QSpinBox()
         self._fields["page_size"].setRange(5, 100)
-        form.addRow("Itens por pagina:", self._fields["page_size"])
+        form.addRow("Itens por página:", self._fields["page_size"])
 
         # Polling Interval
         self._fields["polling_interval_ms"] = QSpinBox()
@@ -75,7 +75,7 @@ class ConfigTab(QWidget):
         form.addRow("Polling interval:", self._fields["polling_interval_ms"])
 
         # Auto zoom
-        self._fields["auto_zoom_on_load"] = QCheckBox("Zoom automatico ao carregar camada")
+        self._fields["auto_zoom_on_load"] = QCheckBox("Zoom automático ao carregar camada")
         form.addRow("", self._fields["auto_zoom_on_load"])
 
         # Log level
@@ -97,7 +97,7 @@ class ConfigTab(QWidget):
         btn_layout = QHBoxLayout()
 
         save_btn = QPushButton("Salvar")
-        save_btn.setToolTip("Salvar todas as configuracoes")
+        save_btn.setToolTip("Salvar todas as configurações")
         save_btn.setStyleSheet(
             "QPushButton { background-color: #4CAF50; color: white; "
             "border-radius: 4px; padding: 6px 16px; }"
@@ -106,12 +106,12 @@ class ConfigTab(QWidget):
         btn_layout.addWidget(save_btn)
 
         restore_btn = QPushButton("Restaurar Defaults")
-        restore_btn.setToolTip("Restaurar todas as configuracoes para os valores padrao")
+        restore_btn.setToolTip("Restaurar todas as configurações para os valores padrão")
         restore_btn.clicked.connect(self._on_restore)
         btn_layout.addWidget(restore_btn)
 
         test_btn = QPushButton("Testar Conexao")
-        test_btn.setToolTip("Testar conectividade com o servidor da API")
+        test_btn.setToolTip("Testar conexão com o servidor da API")
         test_btn.clicked.connect(self._on_test)
         btn_layout.addWidget(test_btn)
 
@@ -148,7 +148,7 @@ class ConfigTab(QWidget):
 
     def _browse_gpkg_dir(self):
         directory = QFileDialog.getExistingDirectory(
-            self, "Selecionar diretorio para GeoPackages"
+            self, "Selecionar diretório para GeoPackages"
         )
         if directory:
             self._fields["gpkg_base_dir"].setText(directory)
@@ -162,7 +162,7 @@ class ConfigTab(QWidget):
     def _on_save(self):
         values = self._collect_values()
         self._controller.save(values)
-        self._show_status("Configuracoes salvas com sucesso!")
+        self._show_status("Configurações salvas com sucesso!")
 
     def _on_restore(self):
         self._controller.restore_defaults()

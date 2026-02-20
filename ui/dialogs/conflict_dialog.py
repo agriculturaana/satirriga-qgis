@@ -23,7 +23,7 @@ class ConflictResolutionDialog(QDialog):
         self._build_ui()
 
     def _build_ui(self):
-        self.setWindowTitle("Resolucao de Conflitos")
+        self.setWindowTitle("Resolução de Conflitos")
         self.setMinimumWidth(600)
         self.setMinimumHeight(400)
 
@@ -37,8 +37,8 @@ class ConflictResolutionDialog(QDialog):
 
         # Info versao
         info = QLabel(
-            f"Versao base: {self._conflict_set.base_version} "
-            f"-> Versao atual: {self._conflict_set.current_version}"
+            f"Versão base: {self._conflict_set.base_version} "
+            f"→ Versão atual: {self._conflict_set.current_version}"
         )
         info.setStyleSheet("font-size: 11px; color: #616161;")
         layout.addWidget(info)
@@ -52,7 +52,7 @@ class ConflictResolutionDialog(QDialog):
         self._table = QTableWidget()
         self._table.setColumnCount(4)
         self._table.setHorizontalHeaderLabels([
-            "Feature Hash", "Tipo", "Sugerido", "Decisao"
+            "Feature Hash", "Tipo", "Sugerido", "Decisão"
         ])
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -81,8 +81,8 @@ class ConflictResolutionDialog(QDialog):
 
             # ComboBox de decisao
             combo = QComboBox()
-            combo.addItem("Minha versao", ConflictResolutionEnum.TAKE_MINE.value)
-            combo.addItem("Versao servidor", ConflictResolutionEnum.TAKE_THEIRS.value)
+            combo.addItem("Minha versão", ConflictResolutionEnum.TAKE_MINE.value)
+            combo.addItem("Versão servidor", ConflictResolutionEnum.TAKE_THEIRS.value)
             combo.addItem("Merge", ConflictResolutionEnum.MERGE.value)
 
             # Pre-seleciona sugerido se disponivel
@@ -101,7 +101,7 @@ class ConflictResolutionDialog(QDialog):
         batch_layout = QHBoxLayout()
 
         btn_all_mine = QPushButton("Aceitar Todas Minhas")
-        btn_all_mine.setToolTip("Resolver todos os conflitos mantendo suas alteracoes locais")
+        btn_all_mine.setToolTip("Resolver todos os conflitos mantendo suas alterações locais")
         btn_all_mine.setStyleSheet(
             "QPushButton { background-color: #FF9800; color: white; "
             "border: none; padding: 4px 12px; border-radius: 3px; }"
@@ -111,7 +111,7 @@ class ConflictResolutionDialog(QDialog):
         batch_layout.addWidget(btn_all_mine)
 
         btn_all_theirs = QPushButton("Aceitar Todas Servidor")
-        btn_all_theirs.setToolTip("Resolver todos os conflitos mantendo a versao do servidor")
+        btn_all_theirs.setToolTip("Resolver todos os conflitos mantendo a versão do servidor")
         btn_all_theirs.setStyleSheet(
             "QPushButton { background-color: #2196F3; color: white; "
             "border: none; padding: 4px 12px; border-radius: 3px; }"
@@ -128,7 +128,7 @@ class ConflictResolutionDialog(QDialog):
         btn_layout.addStretch()
 
         btn_cancel = QPushButton("Cancelar Upload")
-        btn_cancel.setToolTip("Cancelar upload e descartar resolucoes")
+        btn_cancel.setToolTip("Cancelar upload e descartar resoluções")
         btn_cancel.setStyleSheet(
             "QPushButton { background-color: #F44336; color: white; "
             "border: none; padding: 6px 16px; border-radius: 3px; }"
@@ -138,7 +138,7 @@ class ConflictResolutionDialog(QDialog):
         btn_layout.addWidget(btn_cancel)
 
         btn_apply = QPushButton("Aplicar")
-        btn_apply.setToolTip("Enviar resolucoes de conflitos ao servidor")
+        btn_apply.setToolTip("Enviar resoluções de conflitos ao servidor")
         btn_apply.setStyleSheet(
             "QPushButton { background-color: #4CAF50; color: white; "
             "border: none; padding: 6px 16px; border-radius: 3px; font-weight: bold; }"

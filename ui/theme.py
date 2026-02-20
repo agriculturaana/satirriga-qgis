@@ -119,4 +119,14 @@ QPlainTextEdit {
 QFormLayout QLabel {
     font-size: 12px;
 }
+
+/* Tooltips visiveis em qualquer tema */
+QToolTip {
+    background-color: #424242;
+    color: #FFFFFF;
+    border: 1px solid #616161;
+    padding: 4px 8px;
+    font-size: 11px;
+    border-radius: 3px;
+}
 """

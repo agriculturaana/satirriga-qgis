@@ -21,7 +21,7 @@ class TestJobStatusEnum:
         assert JobStatusEnum.FAILED.color == "#F44336"
 
     def test_labels(self):
-        assert JobStatusEnum.DONE.label == "Concluido"
+        assert JobStatusEnum.DONE.label == "Concluído"
         assert JobStatusEnum.PROCESSING.label == "Processando"
 
 
@@ -44,7 +44,7 @@ class TestZonalStatusEnum:
     def test_labels(self):
         assert ZonalStatusEnum.CONSOLIDATED.label == "Consolidado"
         assert ZonalStatusEnum.PROCESSING.label == "Processando"
-        assert ZonalStatusEnum.CONSOLIDATION_FAILED.label == "Falha na consolidacao"
+        assert ZonalStatusEnum.CONSOLIDATION_FAILED.label == "Falha na consolidação"
 
     def test_colors(self):
         assert ZonalStatusEnum.DONE.color == "#4CAF50"
@@ -62,7 +62,7 @@ class TestUploadBatchStatusEnum:
     def test_labels(self):
         assert UploadBatchStatusEnum.RECEIVED.label == "Recebido"
         assert UploadBatchStatusEnum.VALIDATING_TOPOLOGY.label == "Validando topologia"
-        assert UploadBatchStatusEnum.COMPLETED.label == "Concluido"
+        assert UploadBatchStatusEnum.COMPLETED.label == "Concluído"
 
     def test_is_terminal_true(self):
         assert UploadBatchStatusEnum.COMPLETED.is_terminal is True

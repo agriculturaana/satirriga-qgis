@@ -37,7 +37,7 @@ class SessionPopup(QFrame):
         layout.setSpacing(12)
 
         # Titulo
-        title = QLabel("Sessao")
+        title = QLabel("Sessão")
         title.setStyleSheet(
             "font-size: 14px; font-weight: bold; border: none;"
         )
@@ -93,7 +93,7 @@ class SessionPopup(QFrame):
         btn_layout.addStretch()
         self._logout_btn = QPushButton("Logout")
         self._logout_btn.setFixedWidth(120)
-        self._logout_btn.setToolTip("Encerrar sessao e revogar tokens")
+        self._logout_btn.setToolTip("Encerrar sessão e revogar tokens")
         self._logout_btn.setCursor(Qt.PointingHandCursor)
         self._logout_btn.setStyleSheet(
             "QPushButton { background-color: #F44336; color: white; "

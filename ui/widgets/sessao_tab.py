@@ -28,7 +28,7 @@ class SessaoTab(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
 
         # Not authenticated message
-        self._not_auth_label = QLabel("Nao autenticado.\nClique em 'Entrar' no header.")
+        self._not_auth_label = QLabel("Não autenticado.\nClique em 'Entrar' no header.")
         self._not_auth_label.setAlignment(Qt.AlignCenter)
         self._not_auth_label.setStyleSheet("color: #757575; font-size: 12px;")
         layout.addWidget(self._not_auth_label)

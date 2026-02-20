@@ -66,8 +66,8 @@ class SatIrrigaDock(QDockWidget):
         self._pages.setStyleSheet("")
 
         # Placeholders (serao substituidos via set_page_widget)
-        for label_text in ("Home", "Catalogo Zonal (requer login)", "Camadas locais",
-                           "Configuracoes", "Logs"):
+        for label_text in ("Home", "Catálogo Zonal (requer login)", "Camadas locais",
+                           "Configurações", "Logs"):
             placeholder = QLabel(label_text)
             placeholder.setAlignment(Qt.AlignCenter)
             placeholder.setStyleSheet("font-size: 12px;")
@@ -122,7 +122,7 @@ class SatIrrigaDock(QDockWidget):
         header.addStretch()
 
         # User area (sera substituido pelo SessionHeader via plugin.py)
-        self._user_label = QLabel("Nao autenticado")
+        self._user_label = QLabel("Não autenticado")
         self._user_label.setStyleSheet("font-size: 11px; border: none;")
         header.addWidget(self._user_label)
 
@@ -131,11 +131,11 @@ class SatIrrigaDock(QDockWidget):
     def _setup_nav_buttons(self):
         """Cria botoes de navegacao na Activity Bar."""
         self._activity_bar.add_button("nav_home", "Tela inicial", self.PAGE_HOME)
-        self._activity_bar.add_button("nav_mapeamentos", "Catalogo de resultados zonais", self.PAGE_MAPEAMENTOS)
-        self._activity_bar.add_button("nav_camadas", "Camadas locais com status de sincronizacao", self.PAGE_CAMADAS)
+        self._activity_bar.add_button("nav_mapeamentos", "Catálogo de resultados zonais", self.PAGE_MAPEAMENTOS)
+        self._activity_bar.add_button("nav_camadas", "Camadas locais com status de sincronização", self.PAGE_CAMADAS)
         self._activity_bar.add_stretch()
-        self._activity_bar.add_button("nav_config", "Configuracoes do plugin", self.PAGE_CONFIG)
-        self._activity_bar.add_button("nav_logs", "Logs de operacoes", self.PAGE_LOGS)
+        self._activity_bar.add_button("nav_config", "Configurações do plugin", self.PAGE_CONFIG)
+        self._activity_bar.add_button("nav_logs", "Logs de operações", self.PAGE_LOGS)
 
     def _connect_signals(self):
         self._activity_bar.page_changed.connect(self._pages.setCurrentIndex)
@@ -152,7 +152,7 @@ class SatIrrigaDock(QDockWidget):
         else:
             self.navigate_to(self.PAGE_HOME)
             if isinstance(self._user_label, QLabel):
-                self._user_label.setText("Nao autenticado")
+                self._user_label.setText("Não autenticado")
 
     def _on_user_changed(self, user):
         if not isinstance(self._user_label, QLabel):
@@ -161,7 +161,7 @@ class SatIrrigaDock(QDockWidget):
             display = getattr(user, "name", None) or getattr(user, "email", "Usuario")
             self._user_label.setText(display)
         else:
-            self._user_label.setText("Nao autenticado")
+            self._user_label.setText("Não autenticado")
 
     def set_page_widget(self, page_index, widget):
         """Substitui placeholder de uma pagina por widget real."""

@@ -1,5 +1,6 @@
 """Aba de catalogo zonal — tabela de zonais disponiveis para download."""
 
+from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtGui import QColor
 from qgis.PyQt.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -34,11 +35,11 @@ class MapeamentosTab(QWidget):
 
         # Header
         header = QHBoxLayout()
-        header.addWidget(QLabel("Zonais disponiveis para download"))
+        header.addWidget(QLabel("Zonais disponíveis para download"))
         header.addStretch()
         self._refresh_btn = QPushButton("Atualizar")
         self._refresh_btn.setFixedWidth(80)
-        self._refresh_btn.setToolTip("Atualizar lista de zonais disponiveis")
+        self._refresh_btn.setToolTip("Atualizar lista de zonais disponíveis")
         self._refresh_btn.clicked.connect(self._on_catalogo_refresh)
         header.addWidget(self._refresh_btn)
         layout.addLayout(header)
@@ -47,7 +48,7 @@ class MapeamentosTab(QWidget):
         self._cat_table = QTableWidget()
         self._cat_table.setColumnCount(5)
         self._cat_table.setHorizontalHeaderLabels([
-            "Descricao", "Status", "Features", "Area (ha)", "Acao"
+            "Descrição", "Status", "Features", "Área (ha)", "Ação"
         ])
         self._cat_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self._cat_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -62,15 +63,13 @@ class MapeamentosTab(QWidget):
         # Tooltips nos headers
         header_view = self._cat_table.horizontalHeader()
         header_view.model().setHeaderData(1, header_view.orientation(), "Status do processamento", 3)
-        header_view.model().setHeaderData(2, header_view.orientation(), "Numero de feicoes", 3)
-        header_view.model().setHeaderData(3, header_view.orientation(), "Area total em hectares", 3)
+        header_view.model().setHeaderData(2, header_view.orientation(), "Número de feições", 3)
+        header_view.model().setHeaderData(3, header_view.orientation(), "Área total em hectares", 3)
 
         layout.addWidget(self._cat_table)
 
         # Status label
         self._status_label = QLabel()
-        self._status_label.setAlignment(QLabel().alignment())
-        from qgis.PyQt.QtCore import Qt
         self._status_label.setAlignment(Qt.AlignCenter)
         self._status_label.setStyleSheet("font-size: 11px; color: #757575;")
         self._status_label.setVisible(False)
@@ -106,7 +105,7 @@ class MapeamentosTab(QWidget):
         self._cat_table.setRowCount(0)
 
         if not items:
-            self._status_label.setText("Nenhum zonal disponivel")
+            self._status_label.setText("Nenhum zonal disponível")
             self._status_label.setVisible(True)
             return
 
@@ -114,8 +113,12 @@ class MapeamentosTab(QWidget):
         self._cat_table.setRowCount(len(items))
 
         for i, item in enumerate(items):
-            # Descricao
-            self._cat_table.setItem(i, 0, QTableWidgetItem(item.descricao))
+            # Descricao (renderiza HTML)
+            desc_label = QLabel(item.descricao)
+            desc_label.setTextFormat(Qt.RichText)
+            desc_label.setWordWrap(True)
+            desc_label.setStyleSheet("padding: 2px 4px;")
+            self._cat_table.setCellWidget(i, 0, desc_label)
 
             # Status chip
             status_item = QTableWidgetItem(item.status)
@@ -139,7 +142,7 @@ class MapeamentosTab(QWidget):
 
             # Botao download
             btn = QPushButton("Baixar")
-            btn.setToolTip("Baixar resultado zonal como GeoPackage editavel")
+            btn.setToolTip("Baixar resultado zonal como GeoPackage editável")
             btn.setStyleSheet(
                 "QPushButton { background-color: #1976D2; color: white; "
                 "border: none; padding: 2px 8px; border-radius: 3px; }"
@@ -172,7 +175,7 @@ class MapeamentosTab(QWidget):
         elif operation == "catalogo":
             self._refresh_btn.setEnabled(not is_loading)
             if is_loading:
-                self._status_label.setText("Carregando catalogo...")
+                self._status_label.setText("Carregando catálogo...")
                 self._status_label.setStyleSheet("font-size: 11px;")
                 self._status_label.setVisible(True)
             else:

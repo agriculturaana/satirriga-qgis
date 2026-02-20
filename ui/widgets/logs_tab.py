@@ -55,7 +55,7 @@ class LogsTab(QWidget):
 
         copy_btn = QPushButton("Copiar")
         copy_btn.setFixedWidth(80)
-        copy_btn.setToolTip("Copiar todos os logs para a area de transferencia")
+        copy_btn.setToolTip("Copiar todos os logs para a área de transferência")
         copy_btn.clicked.connect(self._on_copy)
         btn_layout.addWidget(copy_btn)
 

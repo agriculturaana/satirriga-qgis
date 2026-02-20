@@ -52,7 +52,7 @@ class HomeTab(QWidget):
         layout.addSpacing(4)
 
         # Subtitulo
-        subtitle = QLabel("Monitoramento de Irrigacao por Satelite")
+        subtitle = QLabel("Monitoramento de Irrigação por Satélite")
         subtitle.setAlignment(Qt.AlignCenter)
         subtitle.setStyleSheet(f"font-size: 12px; color: {mid_color};")
         layout.addWidget(subtitle)
@@ -61,8 +61,8 @@ class HomeTab(QWidget):
 
         # Descricao
         desc = QLabel(
-            "Plugin QGIS para classificacao e monitoramento\n"
-            "de areas irrigadas via sensoriamento remoto."
+            "Plugin QGIS para classificação e monitoramento\n"
+            "de áreas irrigadas via sensoriamento remoto."
         )
         desc.setAlignment(Qt.AlignCenter)
         desc.setWordWrap(True)

@@ -43,7 +43,7 @@ class SessionHeader(QWidget):
         # User button (clicavel -> abre popup)
         self._user_btn = QPushButton()
         self._user_btn.setFixedHeight(24)
-        self._user_btn.setToolTip("Detalhes da sessao e logout")
+        self._user_btn.setToolTip("Detalhes da sessão e logout")
         self._user_btn.setCursor(Qt.PointingHandCursor)
         self._user_btn.setStyleSheet(
             "QPushButton { background: transparent; border: none; "

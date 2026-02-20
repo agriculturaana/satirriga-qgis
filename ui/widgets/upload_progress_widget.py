@@ -115,7 +115,7 @@ class UploadProgressWidget(QWidget):
         if feature_count:
             parts.append(f"Features: {feature_count}")
         if valid_count:
-            parts.append(f"Validas: {valid_count}")
+            parts.append(f"Válidas: {valid_count}")
         if modified_count:
             parts.append(f"Modificadas: {modified_count}")
         if new_count:
