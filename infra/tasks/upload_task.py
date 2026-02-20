@@ -12,7 +12,7 @@ import requests
 
 from qgis.core import (
     QgsVectorLayer, QgsVectorFileWriter, QgsCoordinateReferenceSystem,
-    QgsFields, QgsField, QgsFeature, Qgis,
+    QgsCoordinateTransformContext, QgsFields, QgsField, QgsFeature, Qgis,
 )
 from qgis.PyQt.QtCore import QVariant
 
@@ -72,15 +72,17 @@ class UploadZonalTask(SatIrrigaTask):
             if not crs.isValid():
                 crs = QgsCoordinateReferenceSystem("EPSG:4326")
 
-            writer = QgsVectorFileWriter(
-                temp_gpkg, "utf-8", clean_fields,
-                src_layer.wkbType(), crs, "GPKG",
+            options = QgsVectorFileWriter.SaveVectorOptions()
+            options.driverName = "GPKG"
+            options.fileEncoding = "utf-8"
+            writer = QgsVectorFileWriter.create(
+                temp_gpkg, clean_fields, src_layer.wkbType(),
+                crs, QgsCoordinateTransformContext(), options,
             )
 
-            if writer.hasError() != QgsVectorFileWriter.NoError:
-                self._exception = Exception(
-                    f"Erro ao criar GPKG temp: {writer.errorMessage()}"
-                )
+            if writer is None or writer.hasError() != QgsVectorFileWriter.NoError:
+                err_msg = writer.errorMessage() if writer else "writer nulo"
+                self._exception = Exception(f"Erro ao criar GPKG temp: {err_msg}")
                 return False
 
             total_features = src_layer.featureCount()
@@ -172,16 +174,20 @@ class UploadZonalTask(SatIrrigaTask):
             # ----------------------------------------------------------
             self.signals.status_message.emit("Processando no servidor...")
 
-            while True:
+            max_polls = 150  # 150 * 2s = 5 min timeout
+            poll_count = 0
+            last_status = ""
+
+            while poll_count < max_polls:
                 if self.isCanceled():
                     return False
 
                 time.sleep(2)
+                poll_count += 1
 
                 poll_resp = requests.get(
                     poll_url, headers=headers, timeout=30,
                 )
-                self._log(f"[HTTP] {poll_resp.status_code} {poll_url}")
                 poll_resp.raise_for_status()
                 status_data = poll_resp.json()
 
@@ -191,6 +197,11 @@ class UploadZonalTask(SatIrrigaTask):
                 batch_status = status_data.get("status", "")
                 progress_pct = status_data.get("progressPct", 0)
                 conflict_count = status_data.get("conflictCount", 0)
+
+                # Log apenas quando status muda
+                if batch_status != last_status:
+                    self._log(f"[HTTP] {poll_resp.status_code} {poll_url}")
+                    last_status = batch_status
 
                 # Atualiza progresso: 50 + progressPct * 0.45
                 self.setProgress(50 + int(progress_pct * 0.45))
@@ -212,6 +223,12 @@ class UploadZonalTask(SatIrrigaTask):
                         break
                 except ValueError:
                     pass
+            else:
+                self._exception = Exception(
+                    f"Timeout: servidor nao concluiu em 5 minutos "
+                    f"(ultimo status: {batch_status})"
+                )
+                return False
 
             # ----------------------------------------------------------
             # 5. Resultado (95-100%)

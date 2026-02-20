@@ -8,7 +8,7 @@ import requests
 
 from qgis.core import (
     QgsVectorLayer, QgsVectorFileWriter, QgsCoordinateReferenceSystem,
-    QgsField, QgsFields, QgsFeature, Qgis,
+    QgsCoordinateTransformContext, QgsField, QgsFields, QgsFeature, Qgis,
 )
 from qgis.PyQt.QtCore import QVariant
 
@@ -28,6 +28,39 @@ class DownloadZonalTask(SatIrrigaTask):
         self._token = access_token
         self._gpkg_path = gpkg_output_path
         self._zonal_id = zonal_id
+
+    def _validate_existing_gpkg(self, gpkg_path, expected_count):
+        """Verifica se GPKG existente tem features e geometrias validas."""
+        if not os.path.exists(gpkg_path):
+            self._log("[Download] GPKG nao encontrado para validacao de cache")
+            return False
+        try:
+            layer = QgsVectorLayer(gpkg_path, "cache_check", "ogr")
+            if not layer.isValid():
+                self._log("[Download] GPKG em cache invalido como layer")
+                return False
+            actual = layer.featureCount()
+            if actual == 0 and expected_count > 0:
+                self._log(
+                    f"[Download] GPKG em cache vazio "
+                    f"(0/{expected_count} features)"
+                )
+                return False
+            # Verifica se a primeira feature tem geometria
+            for feat in layer.getFeatures():
+                if feat.geometry().isNull():
+                    self._log(
+                        "[Download] GPKG em cache tem features sem geometria"
+                    )
+                    return False
+                break
+            self._log(
+                f"[Download] GPKG em cache valido ({actual} features)"
+            )
+            return True
+        except Exception as e:
+            self._log(f"[Download] Erro validando GPKG em cache: {e}")
+            return False
 
     def run(self):
         """Executa em worker thread: checkout -> download FGB -> GPKG."""
@@ -95,21 +128,46 @@ class DownloadZonalTask(SatIrrigaTask):
                 f"[HTTP] {dl_resp.status_code} {self._download_url}"
             )
 
-            # 304 Not Modified — apenas atualiza sidecar com novo checkout
+            # 304 Not Modified — valida GPKG existente antes de aceitar cache
             if dl_resp.status_code == 304:
-                self.signals.status_message.emit("Dados em cache, atualizando checkout...")
-                sidecar_data = existing_sidecar.copy()
-                sidecar_data.update({
-                    "editToken": edit_token,
-                    "zonalVersion": zonal_version,
-                    "snapshotHash": snapshot_hash,
-                    "expiresAt": expires_at,
-                    "downloadedAt": datetime.now(timezone.utc).isoformat(),
-                })
-                write_sidecar(self._gpkg_path, sidecar_data)
-                self.setProgress(100)
-                self.signals.status_message.emit("Download concluido (cache)!")
-                return True
+                expected_count = existing_sidecar.get("featureCount", 0)
+                gpkg_valid = self._validate_existing_gpkg(
+                    self._gpkg_path, expected_count,
+                )
+                if gpkg_valid:
+                    self.signals.status_message.emit(
+                        "Dados em cache, atualizando checkout..."
+                    )
+                    sidecar_data = existing_sidecar.copy()
+                    sidecar_data.update({
+                        "editToken": edit_token,
+                        "zonalVersion": zonal_version,
+                        "snapshotHash": snapshot_hash,
+                        "expiresAt": expires_at,
+                        "downloadedAt": datetime.now(timezone.utc).isoformat(),
+                    })
+                    write_sidecar(self._gpkg_path, sidecar_data)
+                    self.setProgress(100)
+                    self.signals.status_message.emit(
+                        "Download concluido (cache)!"
+                    )
+                    return True
+                # GPKG invalido — forca re-download sem ETag
+                self._log(
+                    "[Download] GPKG em cache invalido, forcando re-download"
+                )
+                self.signals.status_message.emit(
+                    "Cache invalido, baixando novamente..."
+                )
+                dl_headers.pop("If-None-Match", None)
+                dl_resp = requests.get(
+                    self._download_url, headers=dl_headers,
+                    stream=True, timeout=120,
+                )
+                self._log(
+                    f"[HTTP] {dl_resp.status_code} {self._download_url} "
+                    "(re-download)"
+                )
 
             dl_resp.raise_for_status()
 
@@ -165,19 +223,17 @@ class DownloadZonalTask(SatIrrigaTask):
             if not crs.isValid():
                 crs = QgsCoordinateReferenceSystem("EPSG:4326")
 
-            writer = QgsVectorFileWriter(
-                self._gpkg_path,
-                "utf-8",
-                fields,
-                src_layer.wkbType(),
-                crs,
-                "GPKG",
+            options = QgsVectorFileWriter.SaveVectorOptions()
+            options.driverName = "GPKG"
+            options.fileEncoding = "utf-8"
+            writer = QgsVectorFileWriter.create(
+                self._gpkg_path, fields, src_layer.wkbType(),
+                crs, QgsCoordinateTransformContext(), options,
             )
 
-            if writer.hasError() != QgsVectorFileWriter.NoError:
-                self._exception = Exception(
-                    f"Erro ao criar GPKG: {writer.errorMessage()}"
-                )
+            if writer is None or writer.hasError() != QgsVectorFileWriter.NoError:
+                err_msg = writer.errorMessage() if writer else "writer nulo"
+                self._exception = Exception(f"Erro ao criar GPKG: {err_msg}")
                 return False
 
             total_features = src_layer.featureCount()
@@ -193,13 +249,15 @@ class DownloadZonalTask(SatIrrigaTask):
             id_field_idx = src_layer.fields().indexOf("id")
 
             written_count = 0
+            write_errors = 0
             for i, src_feat in enumerate(src_layer.getFeatures()):
                 if self.isCanceled():
                     del writer
                     return False
 
                 feat = QgsFeature(fields)
-                feat.setGeometry(src_feat.geometry())
+                geom = src_feat.geometry()
+                feat.setGeometry(geom)
 
                 # Copiar todos os atributos originais
                 for j in range(src_field_count):
@@ -214,8 +272,27 @@ class DownloadZonalTask(SatIrrigaTask):
                 feat.setAttribute(base_idx + 3, self._zonal_id)           # _zonal_id
                 feat.setAttribute(base_idx + 4, edit_token)               # _edit_token
 
-                writer.addFeature(feat)
-                written_count += 1
+                ok = writer.addFeature(feat)
+                if ok:
+                    written_count += 1
+                else:
+                    write_errors += 1
+                    if write_errors <= 3:
+                        self._log(
+                            f"[Download] addFeature falhou para "
+                            f"feature {i} (id={original_fid}): "
+                            f"{writer.errorMessage()}"
+                        )
+
+                # Log diagnostico da primeira feature
+                if i == 0:
+                    self._log(
+                        f"[Download] Primeira feature: "
+                        f"geom_null={geom.isNull()}, "
+                        f"geom_type={geom.type()}, "
+                        f"wkb_type={geom.wkbType()}, "
+                        f"attrs={feat.attributeCount()}"
+                    )
 
                 if total_features > 0:
                     self.setProgress(55 + int((i + 1) * 35 / total_features))
@@ -223,10 +300,17 @@ class DownloadZonalTask(SatIrrigaTask):
             del writer  # Flush e fecha GPKG
             self.setProgress(90)
 
+            self._log(
+                f"[Download] Resultado conversao: "
+                f"{written_count} escritas, {write_errors} erros, "
+                f"{total_features} declaradas no FGB"
+            )
+
             if written_count == 0 and total_features > 0:
                 self._exception = Exception(
                     f"FlatGeobuf declara {total_features} features mas nenhuma "
-                    f"foi lida. Possivel incompatibilidade de formato."
+                    f"foi escrita no GPKG ({write_errors} erros de escrita). "
+                    f"Possivel incompatibilidade de formato."
                 )
                 return False
 
@@ -249,7 +333,8 @@ class DownloadZonalTask(SatIrrigaTask):
             self.setProgress(100)
             self.signals.status_message.emit("Download concluido!")
             self._log(
-                f"GPKG V2 criado: {self._gpkg_path} ({total_features} features)"
+                f"GPKG V2 criado: {self._gpkg_path} "
+                f"({written_count} features escritas)"
             )
             return True
 
