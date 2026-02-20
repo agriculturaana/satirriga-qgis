@@ -101,6 +101,7 @@ class ConflictResolutionDialog(QDialog):
         batch_layout = QHBoxLayout()
 
         btn_all_mine = QPushButton("Aceitar Todas Minhas")
+        btn_all_mine.setToolTip("Resolver todos os conflitos mantendo suas alteracoes locais")
         btn_all_mine.setStyleSheet(
             "QPushButton { background-color: #FF9800; color: white; "
             "border: none; padding: 4px 12px; border-radius: 3px; }"
@@ -110,6 +111,7 @@ class ConflictResolutionDialog(QDialog):
         batch_layout.addWidget(btn_all_mine)
 
         btn_all_theirs = QPushButton("Aceitar Todas Servidor")
+        btn_all_theirs.setToolTip("Resolver todos os conflitos mantendo a versao do servidor")
         btn_all_theirs.setStyleSheet(
             "QPushButton { background-color: #2196F3; color: white; "
             "border: none; padding: 4px 12px; border-radius: 3px; }"
@@ -126,6 +128,7 @@ class ConflictResolutionDialog(QDialog):
         btn_layout.addStretch()
 
         btn_cancel = QPushButton("Cancelar Upload")
+        btn_cancel.setToolTip("Cancelar upload e descartar resolucoes")
         btn_cancel.setStyleSheet(
             "QPushButton { background-color: #F44336; color: white; "
             "border: none; padding: 6px 16px; border-radius: 3px; }"
@@ -135,6 +138,7 @@ class ConflictResolutionDialog(QDialog):
         btn_layout.addWidget(btn_cancel)
 
         btn_apply = QPushButton("Aplicar")
+        btn_apply.setToolTip("Enviar resolucoes de conflitos ao servidor")
         btn_apply.setStyleSheet(
             "QPushButton { background-color: #4CAF50; color: white; "
             "border: none; padding: 6px 16px; border-radius: 3px; font-weight: bold; }"

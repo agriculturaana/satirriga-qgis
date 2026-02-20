@@ -57,6 +57,7 @@ class ConfigTab(QWidget):
         gpkg_layout.addWidget(self._fields["gpkg_base_dir"])
         browse_btn = QPushButton("...")
         browse_btn.setFixedWidth(30)
+        browse_btn.setToolTip("Selecionar diretorio para armazenamento de GeoPackages")
         browse_btn.clicked.connect(self._browse_gpkg_dir)
         gpkg_layout.addWidget(browse_btn)
         form.addRow("Diretorio GPKG:", gpkg_layout)
@@ -96,6 +97,7 @@ class ConfigTab(QWidget):
         btn_layout = QHBoxLayout()
 
         save_btn = QPushButton("Salvar")
+        save_btn.setToolTip("Salvar todas as configuracoes")
         save_btn.setStyleSheet(
             "QPushButton { background-color: #4CAF50; color: white; "
             "border-radius: 4px; padding: 6px 16px; }"
@@ -104,10 +106,12 @@ class ConfigTab(QWidget):
         btn_layout.addWidget(save_btn)
 
         restore_btn = QPushButton("Restaurar Defaults")
+        restore_btn.setToolTip("Restaurar todas as configuracoes para os valores padrao")
         restore_btn.clicked.connect(self._on_restore)
         btn_layout.addWidget(restore_btn)
 
         test_btn = QPushButton("Testar Conexao")
+        test_btn.setToolTip("Testar conectividade com o servidor da API")
         test_btn.clicked.connect(self._on_test)
         btn_layout.addWidget(test_btn)
 

@@ -49,11 +49,13 @@ class LogsTab(QWidget):
         btn_layout = QHBoxLayout()
         clear_btn = QPushButton("Limpar")
         clear_btn.setFixedWidth(80)
+        clear_btn.setToolTip("Limpar todos os logs exibidos")
         clear_btn.clicked.connect(self._on_clear)
         btn_layout.addWidget(clear_btn)
 
         copy_btn = QPushButton("Copiar")
         copy_btn.setFixedWidth(80)
+        copy_btn.setToolTip("Copiar todos os logs para a area de transferencia")
         copy_btn.clicked.connect(self._on_copy)
         btn_layout.addWidget(copy_btn)
 

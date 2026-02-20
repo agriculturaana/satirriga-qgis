@@ -35,6 +35,7 @@ class UploadProgressWidget(QWidget):
         self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(0)
         self._progress_bar.setTextVisible(True)
+        self._progress_bar.setToolTip("Progresso do envio ao servidor")
         layout.addWidget(self._progress_bar)
 
         # Status label
@@ -53,6 +54,7 @@ class UploadProgressWidget(QWidget):
         btn_layout.addStretch()
         self._cancel_btn = QPushButton("Cancelar")
         self._cancel_btn.setFixedWidth(80)
+        self._cancel_btn.setToolTip("Cancelar envio em andamento")
         self._cancel_btn.setStyleSheet(
             "QPushButton { background-color: #F44336; color: white; "
             "border: none; padding: 4px 8px; border-radius: 3px; font-size: 11px; }"

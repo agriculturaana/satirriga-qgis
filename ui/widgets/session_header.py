@@ -30,6 +30,7 @@ class SessionHeader(QWidget):
         # Login button
         self._login_btn = QPushButton("Entrar")
         self._login_btn.setFixedHeight(24)
+        self._login_btn.setToolTip("Autenticar via SSO (Keycloak)")
         self._login_btn.setCursor(Qt.PointingHandCursor)
         self._login_btn.setStyleSheet(
             "QPushButton { background-color: #1976D2; color: white; "
@@ -42,6 +43,7 @@ class SessionHeader(QWidget):
         # User button (clicavel -> abre popup)
         self._user_btn = QPushButton()
         self._user_btn.setFixedHeight(24)
+        self._user_btn.setToolTip("Detalhes da sessao e logout")
         self._user_btn.setCursor(Qt.PointingHandCursor)
         self._user_btn.setStyleSheet(
             "QPushButton { background: transparent; border: none; "
