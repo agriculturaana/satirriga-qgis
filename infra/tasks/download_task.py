@@ -181,12 +181,18 @@ class DownloadZonalTask(SatIrrigaTask):
                 return False
 
             total_features = src_layer.featureCount()
+            self._log(
+                f"[Download] FGB: {total_features} features, "
+                f"{src_layer.fields().count()} campos, "
+                f"CRS={src_layer.crs().authid()}"
+            )
             now_iso = datetime.now(timezone.utc).isoformat()
             src_field_count = src_layer.fields().count()
 
             # Indice do campo 'id' na fonte (ZonalGeometria.id do servidor)
             id_field_idx = src_layer.fields().indexOf("id")
 
+            written_count = 0
             for i, src_feat in enumerate(src_layer.getFeatures()):
                 if self.isCanceled():
                     del writer
@@ -209,12 +215,20 @@ class DownloadZonalTask(SatIrrigaTask):
                 feat.setAttribute(base_idx + 4, edit_token)               # _edit_token
 
                 writer.addFeature(feat)
+                written_count += 1
 
                 if total_features > 0:
                     self.setProgress(55 + int((i + 1) * 35 / total_features))
 
             del writer  # Flush e fecha GPKG
             self.setProgress(90)
+
+            if written_count == 0 and total_features > 0:
+                self._exception = Exception(
+                    f"FlatGeobuf declara {total_features} features mas nenhuma "
+                    f"foi lida. Possivel incompatibilidade de formato."
+                )
+                return False
 
             # ----------------------------------------------------------
             # 4. Sidecar + Cleanup (90-100%)
