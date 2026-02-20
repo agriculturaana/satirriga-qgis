@@ -9,11 +9,7 @@ class AppState(QObject):
     user_changed = pyqtSignal(object)                # UserInfo | None
     session_countdown = pyqtSignal(int)              # segundos restantes
 
-    # Mapeamentos
-    mapeamentos_changed = pyqtSignal(object)         # PaginatedResult
-    selected_mapeamento_changed = pyqtSignal(object) # Mapeamento | None
-
-    # Catalogo zonal (V2)
+    # Catalogo zonal
     catalogo_changed = pyqtSignal(list)              # List[CatalogoItem]
     upload_progress_changed = pyqtSignal(dict)       # UploadBatchStatus dict
     conflict_detected = pyqtSignal(str)              # batchUuid
@@ -27,8 +23,6 @@ class AppState(QObject):
         super().__init__(parent)
         self._authenticated = False
         self._user = None
-        self._mapeamentos = None
-        self._selected_mapeamento = None
         self._catalogo_items = []
 
     @property
@@ -51,24 +45,6 @@ class AppState(QObject):
         self.user_changed.emit(value)
 
     @property
-    def mapeamentos(self):
-        return self._mapeamentos
-
-    @mapeamentos.setter
-    def mapeamentos(self, value):
-        self._mapeamentos = value
-        self.mapeamentos_changed.emit(value)
-
-    @property
-    def selected_mapeamento(self):
-        return self._selected_mapeamento
-
-    @selected_mapeamento.setter
-    def selected_mapeamento(self, value):
-        self._selected_mapeamento = value
-        self.selected_mapeamento_changed.emit(value)
-
-    @property
     def catalogo_items(self):
         return self._catalogo_items
 
@@ -86,6 +62,4 @@ class AppState(QObject):
     def reset(self):
         self.is_authenticated = False
         self.user = None
-        self._mapeamentos = None
-        self._selected_mapeamento = None
         self._catalogo_items = []

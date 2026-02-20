@@ -202,13 +202,6 @@ class SatIrrigaPlugin:
         logs_tab = LogsTab()
         self.dock.set_page_widget(SatIrrigaDock.PAGE_LOGS, logs_tab)
 
-        # V1: download -> carregar layer no QGIS
-        self._mapeamento_controller.download_completed.connect(
-            lambda path, m_id, met_id: self._on_download_completed(
-                path, m_id, met_id, camadas_tab
-            )
-        )
-
         # V2: zonal download -> carregar layer no QGIS
         self._mapeamento_controller.zonal_download_completed.connect(
             lambda path, zonal_id: self._on_zonal_download_completed(
@@ -250,38 +243,6 @@ class SatIrrigaPlugin:
             camadas_btn.set_badge(modified_total)
 
         camadas_tab._refresh_list = refresh_with_badge
-
-    def _on_download_completed(self, gpkg_path, mapeamento_id, metodo_id, camadas_tab):
-        """Carrega GPKG V1 no projeto QGIS apos download."""
-        from qgis.core import QgsProject, QgsVectorLayer
-        from .domain.services.gpkg_service import layer_group_name
-
-        root = QgsProject.instance().layerTreeRoot()
-        mapeamento = self._state.selected_mapeamento
-        group_name = layer_group_name(
-            mapeamento.descricao if mapeamento else f"Mapeamento {mapeamento_id}"
-        )
-        group = root.findGroup(group_name)
-        if not group:
-            group = root.addGroup(group_name)
-
-        layer = QgsVectorLayer(gpkg_path, f"Metodo {metodo_id}", "ogr")
-        if layer.isValid():
-            QgsProject.instance().addMapLayer(layer, False)
-            group.addLayer(layer)
-            self._log(f"Camada carregada: {gpkg_path}")
-
-            self._mapeamento_controller.connect_edit_tracking(
-                layer, mapeamento_id=mapeamento_id, metodo_id=metodo_id,
-            )
-
-            if self._config_repo.get("auto_zoom_on_load"):
-                self.iface.mapCanvas().setExtent(layer.extent())
-                self.iface.mapCanvas().refresh()
-        else:
-            self._log(f"Falha ao carregar GPKG: {gpkg_path}", Qgis.Warning)
-
-        camadas_tab.refresh()
 
     def _on_zonal_download_completed(self, gpkg_path, zonal_id, camadas_tab):
         """Carrega GPKG V2 (zonal) no projeto QGIS apos download."""

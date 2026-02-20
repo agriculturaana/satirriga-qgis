@@ -66,7 +66,7 @@ class SatIrrigaDock(QDockWidget):
         self._pages.setStyleSheet("")
 
         # Placeholders (serao substituidos via set_page_widget)
-        for label_text in ("Home", "Mapeamentos (requer login)", "Camadas locais",
+        for label_text in ("Home", "Catalogo Zonal (requer login)", "Camadas locais",
                            "Configuracoes", "Logs"):
             placeholder = QLabel(label_text)
             placeholder.setAlignment(Qt.AlignCenter)
@@ -130,12 +130,12 @@ class SatIrrigaDock(QDockWidget):
 
     def _setup_nav_buttons(self):
         """Cria botoes de navegacao na Activity Bar."""
-        self._activity_bar.add_button("nav_home", "Home", self.PAGE_HOME)
-        self._activity_bar.add_button("nav_mapeamentos", "Mapeamentos", self.PAGE_MAPEAMENTOS)
-        self._activity_bar.add_button("nav_camadas", "Camadas", self.PAGE_CAMADAS)
+        self._activity_bar.add_button("nav_home", "Tela inicial", self.PAGE_HOME)
+        self._activity_bar.add_button("nav_mapeamentos", "Catalogo de resultados zonais", self.PAGE_MAPEAMENTOS)
+        self._activity_bar.add_button("nav_camadas", "Camadas locais com status de sincronizacao", self.PAGE_CAMADAS)
         self._activity_bar.add_stretch()
-        self._activity_bar.add_button("nav_config", "Configuracoes", self.PAGE_CONFIG)
-        self._activity_bar.add_button("nav_logs", "Logs", self.PAGE_LOGS)
+        self._activity_bar.add_button("nav_config", "Configuracoes do plugin", self.PAGE_CONFIG)
+        self._activity_bar.add_button("nav_logs", "Logs de operacoes", self.PAGE_LOGS)
 
     def _connect_signals(self):
         self._activity_bar.page_changed.connect(self._pages.setCurrentIndex)

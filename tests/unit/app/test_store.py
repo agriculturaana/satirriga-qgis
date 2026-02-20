@@ -41,8 +41,6 @@ class FakeAppState:
         self.auth_state_changed = MockSignal(bool)
         self.user_changed = MockSignal(object)
         self.session_countdown = MockSignal(int)
-        self.mapeamentos_changed = MockSignal(object)
-        self.selected_mapeamento_changed = MockSignal(object)
         self.catalogo_changed = MockSignal(list)
         self.upload_progress_changed = MockSignal(dict)
         self.conflict_detected = MockSignal(str)
@@ -52,8 +50,6 @@ class FakeAppState:
 
         self._authenticated = False
         self._user = None
-        self._mapeamentos = None
-        self._selected_mapeamento = None
         self._catalogo_items = []
 
     @property
@@ -76,24 +72,6 @@ class FakeAppState:
         self.user_changed.emit(value)
 
     @property
-    def mapeamentos(self):
-        return self._mapeamentos
-
-    @mapeamentos.setter
-    def mapeamentos(self, value):
-        self._mapeamentos = value
-        self.mapeamentos_changed.emit(value)
-
-    @property
-    def selected_mapeamento(self):
-        return self._selected_mapeamento
-
-    @selected_mapeamento.setter
-    def selected_mapeamento(self, value):
-        self._selected_mapeamento = value
-        self.selected_mapeamento_changed.emit(value)
-
-    @property
     def catalogo_items(self):
         return self._catalogo_items
 
@@ -111,8 +89,6 @@ class FakeAppState:
     def reset(self):
         self.is_authenticated = False
         self.user = None
-        self._mapeamentos = None
-        self._selected_mapeamento = None
         self._catalogo_items = []
 
 
@@ -123,8 +99,6 @@ class TestAppState:
     def test_initial_state(self):
         assert self.state.is_authenticated is False
         assert self.state.user is None
-        assert self.state.mapeamentos is None
-        assert self.state.selected_mapeamento is None
         assert self.state.catalogo_items == []
 
     def test_set_authenticated_emits_signal(self):
@@ -159,17 +133,6 @@ class TestAppState:
         assert self.state.user_changed.call_count == 1
         assert self.state.user_changed.last_args == (None,)
 
-    def test_set_mapeamentos_emits_signal(self):
-        fake_result = {"total_pages": 5}
-        self.state.mapeamentos = fake_result
-        assert self.state.mapeamentos == fake_result
-        assert self.state.mapeamentos_changed.call_count == 1
-
-    def test_set_selected_mapeamento_emits_signal(self):
-        self.state.selected_mapeamento = {"id": 42}
-        assert self.state.selected_mapeamento == {"id": 42}
-        assert self.state.selected_mapeamento_changed.call_count == 1
-
     def test_set_loading(self):
         self.state.set_loading("download", True)
         assert self.state.loading_changed.call_count == 1
@@ -183,16 +146,12 @@ class TestAppState:
     def test_reset_clears_all_state(self):
         self.state.is_authenticated = True
         self.state.user = {"name": "Test"}
-        self.state.mapeamentos = [1, 2, 3]
-        self.state.selected_mapeamento = {"id": 1}
         self.state.catalogo_items = [{"id": 42}]
 
         self.state.reset()
 
         assert self.state.is_authenticated is False
         assert self.state.user is None
-        assert self.state._mapeamentos is None
-        assert self.state._selected_mapeamento is None
         assert self.state._catalogo_items == []
 
     def test_reset_emits_auth_changed(self):
