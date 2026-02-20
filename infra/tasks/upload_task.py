@@ -120,6 +120,7 @@ class UploadZonalTask(SatIrrigaTask):
             self.signals.status_message.emit("Enviando para servidor...")
             headers = {"Authorization": f"Bearer {self._token}"}
 
+            self._log(f"[HTTP] POST {self._url} (auth=True, multipart)")
             with open(temp_zip, "rb") as f:
                 files = {"file": ("upload.zip", f, "application/zip")}
                 data = {
@@ -131,6 +132,7 @@ class UploadZonalTask(SatIrrigaTask):
                     self._url, headers=headers,
                     files=files, data=data, timeout=300,
                 )
+            self._log(f"[HTTP] {response.status_code} {self._url}")
 
             if response.status_code == 403:
                 self._exception = Exception(
@@ -179,6 +181,7 @@ class UploadZonalTask(SatIrrigaTask):
                 poll_resp = requests.get(
                     poll_url, headers=headers, timeout=30,
                 )
+                self._log(f"[HTTP] {poll_resp.status_code} {poll_url}")
                 poll_resp.raise_for_status()
                 status_data = poll_resp.json()
 

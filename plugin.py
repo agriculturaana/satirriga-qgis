@@ -296,15 +296,17 @@ class SatIrrigaPlugin:
 
         import requests
         try:
+            self._log(f"[HTTP] GET {url} (auth=True)")
             resp = requests.get(
                 url,
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=30,
             )
+            self._log(f"[HTTP] {resp.status_code} {url}")
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
-            self._log(f"Erro ao buscar conflitos: {e}", Qgis.Warning)
+            self._log(f"[HTTP] ERRO {url} -> {e}", Qgis.Warning)
             return
 
         from .domain.models.conflict import ConflictSet
@@ -334,6 +336,7 @@ class SatIrrigaPlugin:
             return
 
         try:
+            self._log(f"[HTTP] POST {url} (auth=True)")
             resp = requests.post(
                 url,
                 headers={
@@ -343,13 +346,14 @@ class SatIrrigaPlugin:
                 data=json.dumps({"decisions": decisions}),
                 timeout=30,
             )
+            self._log(f"[HTTP] {resp.status_code} {url}")
             resp.raise_for_status()
             self._log(
                 f"Conflitos resolvidos para batch {batch_uuid}: "
                 f"{len(decisions)} decisoes enviadas"
             )
         except Exception as e:
-            self._log(f"Erro ao resolver conflitos: {e}", Qgis.Warning)
+            self._log(f"[HTTP] ERRO {url} -> {e}", Qgis.Warning)
             self._state.set_error(
                 "upload", f"Erro ao resolver conflitos: {e}"
             )

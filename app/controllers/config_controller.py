@@ -40,6 +40,9 @@ class ConfigController(QObject):
         url = self._config.get("api_base_url").rstrip("/") + "/actuator/health"
         nam = QgsNetworkAccessManager.instance()
 
+        QgsMessageLog.logMessage(
+            f"[HTTP] GET {url} (auth=False)", PLUGIN_NAME, Qgis.Info,
+        )
         req = QNetworkRequest(QUrl(url))
         req.setRawHeader(b"Accept", b"application/json")
 
@@ -51,9 +54,20 @@ class ConfigController(QObject):
         body = bytes(reply.readAll())
         reply.deleteLater()
 
+        url = reply.url().toString()
         if status and 200 <= status < 300:
+            QgsMessageLog.logMessage(
+                f"[HTTP] {status} {url}", PLUGIN_NAME, Qgis.Info,
+            )
             callback(True, f"Conexao OK (HTTP {status})")
         elif status:
+            QgsMessageLog.logMessage(
+                f"[HTTP] {status} {url}", PLUGIN_NAME, Qgis.Warning,
+            )
             callback(False, f"Servidor respondeu HTTP {status}")
         else:
+            QgsMessageLog.logMessage(
+                f"[HTTP] ERRO DE REDE {url} -> {reply.errorString()}",
+                PLUGIN_NAME, Qgis.Warning,
+            )
             callback(False, f"Erro de rede: {reply.errorString()}")

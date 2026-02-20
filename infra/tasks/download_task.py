@@ -41,8 +41,12 @@ class DownloadZonalTask(SatIrrigaTask):
             self.signals.status_message.emit("Realizando checkout...")
             self.setProgress(5)
 
+            self._log(f"[HTTP] POST {self._checkout_url} (auth=True)")
             checkout_resp = requests.post(
                 self._checkout_url, headers=headers, timeout=30,
+            )
+            self._log(
+                f"[HTTP] {checkout_resp.status_code} {self._checkout_url}"
             )
             if checkout_resp.status_code == 409:
                 try:
@@ -82,9 +86,13 @@ class DownloadZonalTask(SatIrrigaTask):
             if existing_etag:
                 dl_headers["If-None-Match"] = existing_etag
 
+            self._log(f"[HTTP] GET {self._download_url} (auth=True)")
             dl_resp = requests.get(
                 self._download_url, headers=dl_headers,
                 stream=True, timeout=120,
+            )
+            self._log(
+                f"[HTTP] {dl_resp.status_code} {self._download_url}"
             )
 
             # 304 Not Modified — apenas atualiza sidecar com novo checkout
