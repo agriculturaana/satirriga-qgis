@@ -164,8 +164,16 @@ class SatIrrigaPlugin:
     def _on_dock_closed(self):
         self.plugin_is_active = False
 
+    def _on_error_occurred(self, operation, message):
+        """Exibe dialog de erro intuitivo para o usuario."""
+        from .ui.dialogs.error_dialog import ErrorDialog
+        ErrorDialog.show_error(operation, message, parent=self.dock)
+
     def _wire_controllers(self):
         """Conecta controllers aos widgets do dock."""
+        # Erros globais -> dialog
+        self._state.error_occurred.connect(self._on_error_occurred)
+
         # Auth: SessionHeader no header do dock
         session_header = SessionHeader(
             state=self._state,
