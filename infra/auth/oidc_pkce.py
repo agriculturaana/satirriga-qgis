@@ -17,10 +17,11 @@ from ..config.settings import PLUGIN_NAME
 _PORT_RANGE = range(8400, 8411)
 
 
+
 def _build_callback_html(success: bool, error_msg: str = "") -> str:
-    """Gera HTML de callback no padrao visual do SatIrriga."""
+    """Gera HTML de callback no padrão visual do SatIrriga."""
     if success:
-        title = "Autenticacao bem-sucedida!"
+        title = "Autenticação bem-sucedida!"
         subtitle = "Pode fechar esta janela e voltar ao QGIS."
         icon_svg = (
             '<svg width="64" height="64" viewBox="0 0 24 24" fill="none" '
@@ -30,7 +31,7 @@ def _build_callback_html(success: bool, error_msg: str = "") -> str:
             'stroke-linecap="round" stroke-linejoin="round"/></svg>'
         )
     else:
-        title = "Erro na autenticacao"
+        title = "Erro na autenticação"
         subtitle = f"{error_msg}<br>Pode fechar esta janela e tentar novamente."
         icon_svg = (
             '<svg width="64" height="64" viewBox="0 0 24 24" fill="none" '
@@ -42,76 +43,92 @@ def _build_callback_html(success: bool, error_msg: str = "") -> str:
 
     # Logo SVG do SatIrriga (simplificado das formas principais)
     logo_svg = (
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="3500 400 12500 9000" '
-        'style="height:6rem;width:auto;margin:0 auto">'
-        '<defs><style>'
-        '.fil0{fill:#91BBE3}.fil1{fill:#223079}.fil2{fill:#2892D0}'
-        '.fil4{fill:#2B94CE}.fil5{fill:#8EB9DB}.fil6{fill:#1D3478}'
-        '</style></defs>'
-        '<path class="fil0" d="M8080.2 4590.4c21.57,11.88 48.68,27.16 80.29,'
-        '45.17l1298.64 719.58c-181.2,-653.2 152.38,-1378.18 472.38,-1934.66 '
-        '174.42,-303.32 765.42,-1368.76 977.49,-1564.4 179.09,142.35 836.38,'
-        '1294.98 980.92,1561.41 362.26,667.7 622.91,1190.62 469.46,1971.69l'
-        '2175.47 -1225.77 354.31 -203.27c107.41,-59.58 216.54,-122.19 320.83,'
-        '-181.4 197.01,-111.84 446.24,-268.25 647.76,-362.63l-4900.52 -2794.18 '
-        '-2654.45 1499.26c225.97,673.99 214.2,1452.22 -89.06,2185.76 -40.41,'
-        '97.74 -85.08,192.22 -133.52,283.44z"/>'
-        '<path class="fil1" d="M6221.48 6095.67l-101.56 43.98 4837.59 2754.16 '
-        '4883.01 -2810.86 -1008.09 -574.04c-3.42,-0.55 -24.81,-13.89 -38.09,'
-        '-20.2l-904.74 516.52c-12.67,7.52 -23.67,13.83 -32.73,18.69 -685.41,'
-        '367.65 -2382.35,1414.25 -2895.13,1652.45l-1866.79 -1062.9c-201.68,'
-        '-121.55 -1564.97,-930.45 -1839.41,-1033.85 -312.02,244.1 -664.59,'
-        '419.75 -1034.06,516.05z"/>'
-        '<path class="fil2" d="M12359.38 5389.19c-130.89,273.27 -218.46,486.92 '
-        '-449.55,673.34 -221.21,178.45 -488.09,335.81 -787.11,352.9l4.11 '
-        '-279.85 153.83 0c2.84,0 5.63,-0.31 8.31,-0.88 11.26,-0.74 20.88,'
-        '-7.77 25.35,-17.58 4.01,-6.23 6.34,-13.62 6.34,-21.54l0 -251.32c0,'
-        '-22 -18,-40 -40,-40l-133.48 0 -23.22 -1.17 0 -72.06c0,-22 -18,-40 '
-        '-40,-40l-292.6 0c-22,0 -40,18 -40,40l0 73.23 -158.57 0c-13.09,0 '
-        '-24.77,6.37 -32.08,16.17 -5.23,5.43 -8.46,12.81 -8.46,20.88l0 '
-        '263.46c0,16.5 13.5,30 30,30l2.55 0c2.58,0.53 5.26,0.81 7.99,0.81l'
-        '156.29 0 0.49 290.2c-581.75,-42.84 -1149.89,-512.71 -1290.44,'
-        '-1070.63l-1379.21 -764.23c-211.07,397.26 -495.14,731.08 -824.38,'
-        '988.7 274.44,103.4 1637.73,912.3 1839.41,1033.85l1866.79 1062.9c'
-        '512.78,-238.2 2209.72,-1284.8 2895.13,-1652.45l1464.65 -836.18 '
-        '502.05 -311.4 -1288.72 -712.92 -2175.47 1225.77z"/></svg>'
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+        <!-- Creator: CorelDRAW (Evaluation Version) -->
+        <svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="210mm" height="120mm" version="1.1" style="shape-rendering:geometricPrecision; text-rendering:geometricPrecision; image-rendering:optimizeQuality; fill-rule:evenodd; clip-rule:evenodd"
+        viewBox="0 0 21000 12000"
+         xmlns:xlink="http://www.w3.org/1999/xlink"
+         xmlns:xodm="http://www.corel.com/coreldraw/odm/2003">
+         <defs>
+          <style type="text/css">
+           <![CDATA[
+            .fil6 {fill:#1D3478}
+            .fil1 {fill:#223079}
+            .fil2 {fill:#2892D0}
+            .fil4 {fill:#2B94CE}
+            .fil5 {fill:#8EB9DB}
+            .fil0 {fill:#91BBE3}
+            .fil3 {fill:#228ECF;fill-rule:nonzero}
+           ]]>
+          </style>
+         </defs>
+         <g id="Layer_x0020_1">
+          <metadata id="CorelCorpID_0Corel-Layer"/>
+          <g id="_2680915612160">
+           <path class="fil0" d="M8080.2 4590.4c21.57,11.88 48.68,27.16 80.29,45.17l1298.64 719.58c-181.2,-653.2 152.38,-1378.18 472.38,-1934.66 174.42,-303.32 765.42,-1368.76 977.49,-1564.4 179.09,142.35 836.38,1294.98 980.92,1561.41 362.26,667.7 622.91,1190.62 469.46,1971.69l2175.47 -1225.77 354.31 -203.27c107.41,-59.58 216.54,-122.19 320.83,-181.4 197.01,-111.84 446.24,-268.25 647.76,-362.63l-4900.52 -2794.18 -2654.45 1499.26c225.97,673.99 214.2,1452.22 -89.06,2185.76 -40.41,97.74 -85.08,192.22 -133.52,283.44z"/>
+           <path class="fil1" d="M6221.48 6095.67l-101.56 43.98 4837.59 2754.16 4883.01 -2810.86 -1008.09 -574.04c-3.42,-0.55 -24.81,-13.89 -38.09,-20.2l-904.74 516.52c-12.67,7.52 -23.67,13.83 -32.73,18.69 -685.41,367.65 -2382.35,1414.25 -2895.13,1652.45l-1866.79 -1062.9c-201.68,-121.55 -1564.97,-930.45 -1839.41,-1033.85 -312.02,244.1 -664.59,419.75 -1034.06,516.05z"/>
+           <path class="fil2" d="M12359.38 5389.19c-130.89,273.27 -218.46,486.92 -449.55,673.34 -221.21,178.45 -488.09,335.81 -787.11,352.9l4.11 -279.85 153.83 0c2.84,0 5.63,-0.31 8.31,-0.88 11.26,-0.74 20.88,-7.77 25.35,-17.58 4.01,-6.23 6.34,-13.62 6.34,-21.54l0 -251.32c0,-22 -18,-40 -40,-40l-133.48 0 -23.22 -1.17 0 -72.06c0,-22 -18,-40 -40,-40l-292.6 0c-22,0 -40,18 -40,40l0 73.23 -158.57 0c-13.09,0 -24.77,6.37 -32.08,16.17 -5.23,5.43 -8.46,12.81 -8.46,20.88l0 263.46c0,16.5 13.5,30 30,30l2.55 0c2.58,0.53 5.26,0.81 7.99,0.81l156.29 0 0.49 290.2c-581.75,-42.84 -1149.89,-512.71 -1290.44,-1070.63l-1379.21 -764.23c-211.07,397.26 -495.14,731.08 -824.38,988.7 274.44,103.4 1637.73,912.3 1839.41,1033.85l1866.79 1062.9c512.78,-238.2 2209.72,-1284.8 2895.13,-1652.45l1464.65 -836.18 502.05 -311.4 -1288.72 -712.92 -2175.47 1225.77z"/>
+           <path class="fil2" d="M5343.32 2269.37c-928.56,258.28 -685.31,1662.42 172.39,1447.67 916.29,-229.44 734.93,-1700.04 -172.39,-1447.67z"/>
+           <path class="fil0" d="M5157.18 2025.46c111.7,41.74 170.46,51.23 221.8,150.01 304.69,11.31 360.08,-3.4 604.64,182.88l683.39 -1345.72 -812.6 -396.54 -697.23 1409.37z"/>
+           <path class="fil0" d="M3787.97 4632.4l822.63 415.58 634.18 -1254.06c-167.2,-41.54 -287.4,-106.56 -398.73,-236.11 -135.5,-157.68 -80.52,-272.34 -342.28,-301.36l-715.8 1375.95z"/>
+           <path class="fil2" d="M4663.69 3100.46c30.91,-182.23 35.99,-307.45 127.52,-477.95 91.94,-181.47 190.2,-219.84 294.93,-340.18 -640.03,-170.88 -850.48,625.28 -422.45,818.13z"/>
+           <path class="fil4" d="M10825.46 4424.38c-103.72,118.65 -18.36,266.36 93.43,360.24 84.52,-112.91 171.36,-204.54 105.07,-335 -15.43,-30.35 -46.35,-50.3 -92.32,-57.95 -43.15,-1.25 -84.34,7.73 -106.18,32.71z"/>
+           <path class="fil4" d="M10093.29 4519.81c-30.5,154.62 117.27,239.85 261.03,265.26 16.74,-140.04 46.14,-262.82 -76.5,-342.65 -28.54,-18.57 -65.3,-20.39 -108.93,-4.02 -37.99,20.49 -69.17,48.85 -75.6,81.41z"/>
+           <path class="fil5" d="M10815.54 3873.49c-103.72,118.65 -18.36,266.35 93.43,360.23 84.52,-112.9 171.36,-204.53 105.07,-334.99 -15.43,-30.35 -46.35,-50.31 -92.32,-57.95 -43.15,-1.25 -84.34,7.72 -106.18,32.71z"/>
+           <path class="fil5" d="M9902.19 4011.11c-30.49,154.62 117.28,239.85 261.04,265.26 16.74,-140.04 46.14,-262.82 -76.51,-342.65 -28.53,-18.57 -65.29,-20.39 -108.92,-4.03 -37.99,20.5 -69.18,48.86 -75.61,81.42z"/>
+           <path class="fil6" d="M10832.7 5014.65c-103.72,118.66 -18.36,266.36 93.43,360.24 84.52,-112.91 171.37,-204.54 105.08,-335 -15.43,-30.35 -46.35,-50.3 -92.32,-57.94 -43.15,-1.25 -84.34,7.72 -106.19,32.7z"/>
+           <path class="fil6" d="M10354.04 5095.94c-30.5,154.62 117.28,239.85 261.03,265.26 16.75,-140.04 46.14,-262.82 -76.5,-342.66 -28.54,-18.56 -65.29,-20.38 -108.92,-4.02 -37.99,20.49 -69.18,48.86 -75.61,81.42z"/>
+           <g>
+            <path class="fil2" d="M7367.06 3044.51l332.3 -95.75c-3.76,199 5.99,452.08 -33.04,647.23 -46.58,232.93 -104.79,412.51 -220.41,619.99 -126.24,226.55 -597.22,656.99 -864.17,814.75l0 0 -135.29 -288.96c77.15,-56.27 154.29,-112.54 231.44,-168.81 131.13,-95.65 343.4,-318.58 433.39,-453.58 95.42,-143.17 169.73,-282.55 210.73,-449.71 48.39,-197.25 73.97,-402.13 45.05,-625.16z"/>
+            <path class="fil0" d="M6223.12 4115.39l107.99 343.01 68.49 -49.29c64.4,-46.35 198.33,-181.52 252.29,-239.72 65.47,-70.6 65.16,-76.79 126.89,-150.7 43.29,-51.84 135.24,-197.85 159.3,-254.05 95.16,-222.27 106.06,-318.98 133.75,-556.65 4.4,-37.8 9.88,-127.98 8.82,-166.09l-325.24 82.09c34.09,166.2 -9.1,388.42 -130.6,597.28 -103.16,177.31 -241.95,309.23 -379.42,375.77 -7.63,6.23 -15.08,12.36 -22.27,18.35z"/>
+           </g>
+           <path class="fil4" d="M11702.3 4522.52c30.5,154.62 -117.27,239.85 -261.03,265.26 -16.74,-140.04 -46.14,-262.82 76.5,-342.65 28.54,-18.57 65.3,-20.39 108.93,-4.02 37.99,20.49 69.17,48.85 75.6,81.41z"/>
+           <path class="fil5" d="M11943.4 4013.82c30.49,154.62 -117.28,239.85 -261.04,265.26 -16.74,-140.04 -46.14,-262.82 76.51,-342.65 28.53,-18.57 65.29,-20.39 108.92,-4.03 37.99,20.5 69.18,48.86 75.61,81.42z"/>
+           <path class="fil6" d="M11451.55 5098.65c30.5,154.62 -117.28,239.85 -261.03,265.26 -16.75,-140.04 -46.14,-262.82 76.5,-342.66 28.54,-18.56 65.29,-20.38 108.92,-4.02 37.99,20.49 69.18,48.86 75.61,81.42z"/>
+          </g>
+         </g>
+        </svg>
+        """
     )
 
     return f"""<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SatIrriga - Autenticacao</title>
-<style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-min-height:100vh;display:flex;align-items:center;justify-content:center;
-background:#f5f5f5;overflow:hidden}}
-.wave{{position:fixed;bottom:-10rem;left:0;width:100%;height:auto;z-index:0}}
-.card{{position:relative;z-index:1;text-align:center;padding:48px 40px}}
-.title{{font-size:28px;font-weight:700;color:#223079;margin:16px 0 8px}}
-.subtitle{{font-size:16px;color:#546e7a;line-height:1.5}}
-</style>
-</head>
-<body>
-<svg class="wave" viewBox="0 0 960 540" preserveAspectRatio="none"
-xmlns="http://www.w3.org/2000/svg">
-<defs><linearGradient id="wg" x1="0%" y1="0%" x2="100%" y2="0%">
-<stop offset="0%" style="stop-color:#1D3478"/><stop offset="50%" style="stop-color:#2892D0"/>
-<stop offset="100%" style="stop-color:#91BBE3"/></linearGradient></defs>
-<rect width="960" height="540" fill="#f5f5f5"/>
-<path d="M0 331L26.7 321C53.3 311 106.7 291 160 291C213.3 291 266.7 311 320
-329.5C373.3 348 426.7 365 480 373.2C533.3 381.3 586.7 380.7 640 373.8C693.3
-367 746.7 354 800 341.2C853.3 328.3 906.7 315.7 933.3 309.3L960 303L960
-541L0 541Z" fill="url(#wg)"/></svg>
-<div class="card">
-{logo_svg}
-{icon_svg}
-<div class="title">{title}</div>
-<p class="subtitle">{subtitle}</p>
-</div>
-</body></html>"""
+        <html lang="pt-BR">
+        <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>SatIrriga - Autenticação</title>
+        <style>
+        *{{margin:0;padding:0;box-sizing:border-box}}
+        body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+        min-height:100vh;display:flex;align-items:center;justify-content:center;
+        background:#f5f5f5;overflow:hidden}}
+        .wave{{position:fixed;bottom:-10rem;left:0;width:100%;height:auto;z-index:0}}
+        .card{{position:relative;z-index:1;text-align:center;padding:48px 40px}}
+        .title{{font-size:28px;font-weight:700;color:#223079;margin:16px 0 8px}}
+        .subtitle{{font-size:16px;color:#546e7a;line-height:1.5}}
+        </style>
+        </head>
+        <body>
+        <svg class="wave" viewBox="0 0 960 540" preserveAspectRatio="none"
+        xmlns="http://www.w3.org/2000/svg">
+        <defs><linearGradient id="wg" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" style="stop-color:#1D3478"/><stop offset="50%" style="stop-color:#2892D0"/>
+        <stop offset="100%" style="stop-color:#91BBE3"/></linearGradient></defs>
+        <rect width="960" height="540" fill="#f5f5f5"/>
+        <path d="M0 331L26.7 321C53.3 311 106.7 291 160 291C213.3 291 266.7 311 320
+        329.5C373.3 348 426.7 365 480 373.2C533.3 381.3 586.7 380.7 640 373.8C693.3
+        367 746.7 354 800 341.2C853.3 328.3 906.7 315.7 933.3 309.3L960 303L960
+        541L0 541Z" fill="url(#wg)"/></svg>
+        <div class="card">
+        {logo_svg}
+        {icon_svg}
+        <div class="title">{title}</div>
+        <p class="subtitle">{subtitle}</p>
+        </div>
+        </body></html>
+    """
 
 
 class _CallbackHandler(BaseHTTPRequestHandler):
@@ -119,6 +136,8 @@ class _CallbackHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+
+
         if parsed.path != "/callback":
             self.send_response(404)
             self.end_headers()
@@ -149,7 +168,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         self.server.auth_state = state
         self.server.auth_error = error
 
-        # Agenda shutdown (nao pode chamar direto do handler)
+        # Agenda shutdown (não pode chamar direto do handler)
         threading.Thread(target=self.server.shutdown, daemon=True).start()
 
     def log_message(self, format, *args):
@@ -222,7 +241,7 @@ class OidcPkceFlow(QObject):
         return False
 
     def start_login(self):
-        """Inicia o fluxo de login: abre browser para autenticacao."""
+        """Inicia o fluxo de login: abre browser para autenticação."""
         self._generate_pkce()
         self._generate_state()
 
@@ -246,7 +265,7 @@ class OidcPkceFlow(QObject):
         auth_url = f"{auth_endpoint}?{urlencode(params)}"
 
         QgsMessageLog.logMessage(
-            "Abrindo browser para autenticacao...",
+            "Abrindo browser para autenticação...",
             PLUGIN_NAME, Qgis.Info,
         )
         QDesktopServices.openUrl(QUrl(auth_url))
@@ -268,15 +287,15 @@ class OidcPkceFlow(QObject):
 
         # Emite signals direto — cross-thread emit usa QueuedConnection
         # automaticamente (OidcPkceFlow tem afinidade com a main thread).
-        # QTimer.singleShot nao funciona de threading.Thread (sem event loop Qt).
+        # QTimer.singleShot não funciona de threading.Thread (sem event loop Qt).
         if error:
             self.auth_error.emit(f"Erro SSO: {error}")
         elif state != self._state:
-            self.auth_error.emit("Falha de seguranca: state invalido.")
+            self.auth_error.emit("Falha de segurança: state inválido.")
         elif code:
             self.auth_code_received.emit(code, self._redirect_uri)
         else:
-            self.auth_error.emit("Timeout aguardando autenticacao.")
+            self.auth_error.emit("Timeout aguardando autenticação.")
 
     def token_endpoint(self) -> str:
         return (
