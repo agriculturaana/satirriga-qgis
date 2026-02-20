@@ -16,13 +16,16 @@ Consulte, baixe, edite e envie mapeamentos de irrigacao direto no QGIS.
 
 #### Desenvolvimento
 
-- `make deploy` — Deploya no QGIS local
-- `make test` — Roda todos os testes
-- `make test-unit` — Roda somente testes unitarios
-- `make compile` — Compila resources.qrc
-- `make clean` — Limpa arquivos gerados
+- `make compile` — Compila resources.qrc -> resources.py
+- `make deploy` — Copia plugin para diretorio QGIS local
+- `make test` — Executa todos os testes (pytest)
+- `make test-unit` — Executa somente testes unitarios
+- `make clean` — Remove arquivos gerados
+- `make derase` — Remove plugin do diretorio QGIS
+- `make package VERSION=vX.Y.Z` — Cria ZIP para distribuicao via git archive
 - `make validate` — Valida metadata e estrutura para plugins.qgis.org
 - `make publish` — Valida e empacota ZIP para publicar no plugins.qgis.org
+- `make pylint` — Executa pylint no codigo fonte
 
 #### Uso
 
