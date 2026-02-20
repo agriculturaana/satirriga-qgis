@@ -1,21 +1,21 @@
-"""Aba de mapeamentos — tabela paginada, buscavel, ordenavel."""
+"""Aba de mapeamentos — tabela paginada + catalogo zonal."""
 
 from qgis.PyQt.QtCore import Qt, QTimer
 from qgis.PyQt.QtGui import QColor
 from qgis.PyQt.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QLabel,
-    QAbstractItemView, QFrame,
+    QAbstractItemView, QFrame, QStackedWidget,
 )
 
 from qgis.core import QgsMessageLog, Qgis
 
-from ...domain.models.enums import JobStatusEnum
+from ...domain.models.enums import JobStatusEnum, ZonalStatusEnum
 from ...infra.config.settings import PLUGIN_NAME
 
 
 class MapeamentosTab(QWidget):
-    """Tabela de mapeamentos com busca, paginacao e detalhe."""
+    """Tabela de mapeamentos com busca, paginacao, detalhe e catalogo zonal."""
 
     # Mapeamento de colunas para campos de ordenacao no server
     _SORT_FIELDS = {
@@ -32,6 +32,7 @@ class MapeamentosTab(QWidget):
         self._polling_timer = None
         self._polling_mapeamento_id = None
         self._detail_mapeamento = None
+        self._active_mode = "mapeamentos"  # "mapeamentos" ou "catalogo"
 
         self._build_ui()
         self._connect_signals()
@@ -45,6 +46,36 @@ class MapeamentosTab(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
+        # Toggle Mapeamentos / Catalogo Zonal
+        toggle_layout = QHBoxLayout()
+        toggle_layout.setSpacing(0)
+
+        self._btn_mapeamentos = QPushButton("Mapeamentos")
+        self._btn_mapeamentos.setCheckable(True)
+        self._btn_mapeamentos.setChecked(True)
+        self._btn_mapeamentos.setStyleSheet(self._toggle_btn_style(True))
+        self._btn_mapeamentos.clicked.connect(lambda: self._switch_mode("mapeamentos"))
+
+        self._btn_catalogo = QPushButton("Catalogo Zonal")
+        self._btn_catalogo.setCheckable(True)
+        self._btn_catalogo.setChecked(False)
+        self._btn_catalogo.setStyleSheet(self._toggle_btn_style(False))
+        self._btn_catalogo.clicked.connect(lambda: self._switch_mode("catalogo"))
+
+        toggle_layout.addWidget(self._btn_mapeamentos)
+        toggle_layout.addWidget(self._btn_catalogo)
+        toggle_layout.addStretch()
+        layout.addLayout(toggle_layout)
+
+        # Stacked widget para alternar modos
+        self._stack = QStackedWidget()
+
+        # --- Modo Mapeamentos (index 0) ---
+        mapeamentos_page = QWidget()
+        mapeamentos_layout = QVBoxLayout()
+        mapeamentos_layout.setContentsMargins(0, 0, 0, 0)
+        mapeamentos_layout.setSpacing(4)
+
         # Barra de busca
         search_layout = QHBoxLayout()
         self._search_input = QLineEdit()
@@ -55,7 +86,7 @@ class MapeamentosTab(QWidget):
         self._refresh_btn = QPushButton("Atualizar")
         self._refresh_btn.setFixedWidth(80)
         search_layout.addWidget(self._refresh_btn)
-        layout.addLayout(search_layout)
+        mapeamentos_layout.addLayout(search_layout)
 
         # Tabela
         self._table = QTableWidget()
@@ -68,9 +99,9 @@ class MapeamentosTab(QWidget):
         self._table.setSelectionMode(QAbstractItemView.SingleSelection)
         self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._table.verticalHeader().setVisible(False)
-        self._table.setSortingEnabled(False)  # Sorting via server
+        self._table.setSortingEnabled(False)
         self._table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
-        layout.addWidget(self._table)
+        mapeamentos_layout.addWidget(self._table)
 
         # Paginacao
         pag_layout = QHBoxLayout()
@@ -89,14 +120,14 @@ class MapeamentosTab(QWidget):
         self._next_btn.setFixedWidth(80)
         self._next_btn.setEnabled(False)
         pag_layout.addWidget(self._next_btn)
-        layout.addLayout(pag_layout)
+        mapeamentos_layout.addLayout(pag_layout)
 
         # Loading / error feedback
         self._status_label = QLabel()
         self._status_label.setAlignment(Qt.AlignCenter)
         self._status_label.setStyleSheet("font-size: 11px;")
         self._status_label.setVisible(False)
-        layout.addWidget(self._status_label)
+        mapeamentos_layout.addWidget(self._status_label)
 
         # Painel de detalhe expandivel
         self._detail_frame = QFrame()
@@ -106,13 +137,11 @@ class MapeamentosTab(QWidget):
         self._detail_layout.setContentsMargins(8, 8, 8, 8)
         self._detail_layout.setSpacing(4)
 
-        # Header do detalhe
         self._detail_header = QLabel()
         self._detail_header.setWordWrap(True)
         self._detail_header.setStyleSheet("font-size: 12px;")
         self._detail_layout.addWidget(self._detail_header)
 
-        # Mini-tabela de metodos
         self._metodos_table = QTableWidget()
         self._metodos_table.setColumnCount(3)
         self._metodos_table.setHorizontalHeaderLabels(["Metodo", "Status", "Acao"])
@@ -126,7 +155,55 @@ class MapeamentosTab(QWidget):
         self._detail_layout.addWidget(self._metodos_table)
 
         self._detail_frame.setLayout(self._detail_layout)
-        layout.addWidget(self._detail_frame)
+        mapeamentos_layout.addWidget(self._detail_frame)
+
+        mapeamentos_page.setLayout(mapeamentos_layout)
+        self._stack.addWidget(mapeamentos_page)
+
+        # --- Modo Catalogo Zonal (index 1) ---
+        catalogo_page = QWidget()
+        catalogo_layout = QVBoxLayout()
+        catalogo_layout.setContentsMargins(0, 0, 0, 0)
+        catalogo_layout.setSpacing(4)
+
+        # Header do catalogo
+        cat_header = QHBoxLayout()
+        cat_header.addWidget(QLabel("Zonais disponiveis para download"))
+        cat_header.addStretch()
+        self._cat_refresh_btn = QPushButton("Atualizar")
+        self._cat_refresh_btn.setFixedWidth(80)
+        self._cat_refresh_btn.clicked.connect(self._on_catalogo_refresh)
+        cat_header.addWidget(self._cat_refresh_btn)
+        catalogo_layout.addLayout(cat_header)
+
+        # Tabela de catalogo
+        self._cat_table = QTableWidget()
+        self._cat_table.setColumnCount(5)
+        self._cat_table.setHorizontalHeaderLabels([
+            "Descricao", "Status", "Features", "Area (ha)", "Acao"
+        ])
+        self._cat_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self._cat_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self._cat_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self._cat_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self._cat_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self._cat_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self._cat_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._cat_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._cat_table.verticalHeader().setVisible(False)
+        catalogo_layout.addWidget(self._cat_table)
+
+        # Status catalogo
+        self._cat_status_label = QLabel()
+        self._cat_status_label.setAlignment(Qt.AlignCenter)
+        self._cat_status_label.setStyleSheet("font-size: 11px; color: #757575;")
+        self._cat_status_label.setVisible(False)
+        catalogo_layout.addWidget(self._cat_status_label)
+
+        catalogo_page.setLayout(catalogo_layout)
+        self._stack.addWidget(catalogo_page)
+
+        layout.addWidget(self._stack)
 
         # Polling timer (3s para metodos PROCESSING)
         self._polling_timer = QTimer(self)
@@ -141,6 +218,35 @@ class MapeamentosTab(QWidget):
         self._search_timer.setInterval(500)
         self._search_timer.timeout.connect(self._do_search)
 
+    def _toggle_btn_style(self, active):
+        if active:
+            return (
+                "QPushButton { background-color: #1976D2; color: white; "
+                "border: none; padding: 4px 12px; border-radius: 3px; "
+                "font-size: 11px; font-weight: bold; }"
+            )
+        return (
+            "QPushButton { background-color: #E0E0E0; color: #616161; "
+            "border: none; padding: 4px 12px; border-radius: 3px; "
+            "font-size: 11px; }"
+            "QPushButton:hover { background-color: #BDBDBD; }"
+        )
+
+    def _switch_mode(self, mode):
+        """Alterna entre modo Mapeamentos e Catalogo Zonal."""
+        self._active_mode = mode
+        is_mapeamentos = mode == "mapeamentos"
+
+        self._btn_mapeamentos.setChecked(is_mapeamentos)
+        self._btn_catalogo.setChecked(not is_mapeamentos)
+        self._btn_mapeamentos.setStyleSheet(self._toggle_btn_style(is_mapeamentos))
+        self._btn_catalogo.setStyleSheet(self._toggle_btn_style(not is_mapeamentos))
+
+        self._stack.setCurrentIndex(0 if is_mapeamentos else 1)
+
+        if not is_mapeamentos:
+            self._controller.load_catalogo()
+
     def _connect_signals(self):
         self._search_input.textChanged.connect(self._on_search_text_changed)
         self._refresh_btn.clicked.connect(self._on_refresh)
@@ -154,6 +260,9 @@ class MapeamentosTab(QWidget):
         self._state.error_occurred.connect(self._on_error)
         self._state.auth_state_changed.connect(self._on_auth_changed)
 
+        # Catalogo signals
+        self._state.catalogo_changed.connect(self._on_catalogo_changed)
+
     # ----------------------------------------------------------------
     # Event handlers
     # ----------------------------------------------------------------
@@ -166,6 +275,9 @@ class MapeamentosTab(QWidget):
 
     def _on_refresh(self):
         self._controller.load_mapeamentos()
+
+    def _on_catalogo_refresh(self):
+        self._controller.load_catalogo()
 
     def _on_header_clicked(self, section):
         field = self._SORT_FIELDS.get(section)
@@ -197,9 +309,70 @@ class MapeamentosTab(QWidget):
             self._table.setRowCount(0)
             self._page_label.setText("Pagina 0 de 0")
             self._detail_frame.setVisible(False)
+            self._cat_table.setRowCount(0)
 
     # ----------------------------------------------------------------
-    # State updates
+    # Catalogo Zonal
+    # ----------------------------------------------------------------
+
+    def _on_catalogo_changed(self, items):
+        """Atualiza tabela do catalogo zonal."""
+        self._cat_table.setRowCount(0)
+
+        if not items:
+            self._cat_status_label.setText("Nenhum zonal disponivel")
+            self._cat_status_label.setVisible(True)
+            return
+
+        self._cat_status_label.setVisible(False)
+        self._cat_table.setRowCount(len(items))
+
+        for i, item in enumerate(items):
+            # Descricao
+            self._cat_table.setItem(i, 0, QTableWidgetItem(item.descricao))
+
+            # Status chip
+            status_item = QTableWidgetItem(item.status)
+            try:
+                status_enum = ZonalStatusEnum(item.status)
+                status_item.setText(status_enum.label)
+                status_item.setForeground(QColor(status_enum.color))
+            except ValueError:
+                pass
+            self._cat_table.setItem(i, 1, status_item)
+
+            # Features count
+            self._cat_table.setItem(
+                i, 2, QTableWidgetItem(str(item.result_count))
+            )
+
+            # Area
+            self._cat_table.setItem(
+                i, 3, QTableWidgetItem(f"{item.total_area_ha:,.1f}")
+            )
+
+            # Botao download
+            btn = QPushButton("Baixar")
+            btn.setStyleSheet(
+                "QPushButton { background-color: #1976D2; color: white; "
+                "border: none; padding: 2px 8px; border-radius: 3px; }"
+                "QPushButton:hover { background-color: #1565C0; }"
+                "QPushButton:disabled { background-color: #90CAF9; }"
+            )
+            zonal_id = item.id
+            btn.clicked.connect(
+                lambda checked, zid=zonal_id: self._on_zonal_download_clicked(zid)
+            )
+            self._cat_table.setCellWidget(i, 4, btn)
+
+        self._cat_table.resizeRowsToContents()
+
+    def _on_zonal_download_clicked(self, zonal_id):
+        """Inicia download do resultado zonal."""
+        self._controller.download_zonal_result(zonal_id)
+
+    # ----------------------------------------------------------------
+    # State updates (Mapeamentos)
     # ----------------------------------------------------------------
 
     def _on_mapeamentos_changed(self, result):
@@ -219,13 +392,8 @@ class MapeamentosTab(QWidget):
         self._table.setRowCount(len(result.content))
 
         for i, m in enumerate(result.content):
-            # Descricao
             self._table.setItem(i, 0, QTableWidgetItem(m.descricao))
-
-            # Data Referencia
             self._table.setItem(i, 1, QTableWidgetItem(m.data_referencia))
-
-            # Autor
             self._table.setItem(i, 2, QTableWidgetItem(m.user_name or "-"))
 
         # Paginacao
@@ -259,10 +427,8 @@ class MapeamentosTab(QWidget):
 
         has_processing = False
         for i, m in enumerate(mapeamento.metodos):
-            # Metodo
             self._metodos_table.setItem(i, 0, QTableWidgetItem(m.metodo_apply))
 
-            # Status chip
             status_item = QTableWidgetItem(m.status)
             try:
                 status_enum = JobStatusEnum(m.status)
@@ -274,24 +440,15 @@ class MapeamentosTab(QWidget):
                 pass
             self._metodos_table.setItem(i, 1, status_item)
 
-            # Botao de acao
+            # Acao — V1 download deprecado, mostra info
             try:
                 status_enum = JobStatusEnum(m.status)
                 if status_enum == JobStatusEnum.DONE:
-                    btn = QPushButton("Baixar")
-                    btn.setStyleSheet(
-                        "QPushButton { background-color: #1976D2; color: white; "
-                        "border: none; padding: 2px 8px; border-radius: 3px; }"
-                        "QPushButton:hover { background-color: #1565C0; }"
-                        "QPushButton:disabled { background-color: #90CAF9; }"
-                    )
-                    metodo_id = m.id
-                    mapeamento_id = mapeamento.id
-                    btn.clicked.connect(
-                        lambda checked, mid=mapeamento_id, met=metodo_id:
-                        self._on_download_clicked(mid, met)
-                    )
-                    self._metodos_table.setCellWidget(i, 2, btn)
+                    lbl = QLabel("Use Catalogo")
+                    lbl.setAlignment(Qt.AlignCenter)
+                    lbl.setStyleSheet("color: #1976D2; font-size: 11px;")
+                    lbl.setToolTip("Download V1 deprecado. Use o Catalogo Zonal.")
+                    self._metodos_table.setCellWidget(i, 2, lbl)
                 elif status_enum == JobStatusEnum.PROCESSING:
                     lbl = QLabel("Aguardando...")
                     lbl.setAlignment(Qt.AlignCenter)
@@ -304,7 +461,6 @@ class MapeamentosTab(QWidget):
 
         self._detail_frame.setVisible(True)
 
-        # Polling para metodos PROCESSING
         if has_processing:
             self._polling_mapeamento_id = mapeamento.id
             self._start_polling()
@@ -312,7 +468,7 @@ class MapeamentosTab(QWidget):
             self._stop_polling()
 
     def _on_download_clicked(self, mapeamento_id, metodo_id):
-        """Inicia download da classificacao de um metodo."""
+        """Inicia download da classificacao de um metodo (V1 deprecado)."""
         self._controller.download_classification(mapeamento_id, metodo_id)
 
     def _start_polling(self):
@@ -337,15 +493,33 @@ class MapeamentosTab(QWidget):
             else:
                 self._status_label.setVisible(False)
         elif operation == "download":
-            # Desabilita/habilita botoes de download na mini-tabela
+            # Desabilita botoes durante download
             for row in range(self._metodos_table.rowCount()):
                 widget = self._metodos_table.cellWidget(row, 2)
                 if isinstance(widget, QPushButton):
                     widget.setEnabled(not is_loading)
                     widget.setText("Baixando..." if is_loading else "Baixar")
+            # Tambem desabilita botoes do catalogo
+            for row in range(self._cat_table.rowCount()):
+                widget = self._cat_table.cellWidget(row, 4)
+                if isinstance(widget, QPushButton):
+                    widget.setEnabled(not is_loading)
+                    widget.setText("Baixando..." if is_loading else "Baixar")
+        elif operation == "catalogo":
+            self._cat_refresh_btn.setEnabled(not is_loading)
+            if is_loading:
+                self._cat_status_label.setText("Carregando catalogo...")
+                self._cat_status_label.setStyleSheet("font-size: 11px;")
+                self._cat_status_label.setVisible(True)
+            else:
+                self._cat_status_label.setVisible(False)
 
     def _on_error(self, operation, message):
         if operation in ("mapeamentos", "download"):
             self._status_label.setText(f"Erro: {message}")
             self._status_label.setStyleSheet("color: #F44336; font-size: 11px;")
             self._status_label.setVisible(True)
+        elif operation == "catalogo":
+            self._cat_status_label.setText(f"Erro: {message}")
+            self._cat_status_label.setStyleSheet("color: #F44336; font-size: 11px;")
+            self._cat_status_label.setVisible(True)

@@ -17,6 +17,12 @@ class MapeamentoController(QObject):
     download_completed = pyqtSignal(str, int, int)  # gpkg_path, mapeamento_id, metodo_id
     upload_completed = pyqtSignal(str, int)          # gpkg_path, count
 
+    # Signals V2 (zonal)
+    zonal_download_completed = pyqtSignal(str, int)  # gpkg_path, zonal_id
+    zonal_upload_completed = pyqtSignal(str, int)    # gpkg_path, zonal_id
+    upload_progress = pyqtSignal(dict)               # UploadBatchStatus dict
+    conflict_detected = pyqtSignal(str)              # batchUuid
+
     def __init__(self, state: AppState, http_client: HttpClient,
                  config_repo, token_provider=None, parent=None):
         super().__init__(parent)
@@ -28,6 +34,7 @@ class MapeamentoController(QObject):
         # Tracking de requests pendentes
         self._pending_list_id = None
         self._pending_detail_id = None
+        self._pending_catalogo_id = None
         self._active_tasks = []
         self._pending_edit_fids = {}
 
@@ -115,6 +122,19 @@ class MapeamentoController(QObject):
         self._pending_detail_id = self._http.get(url)
 
     # ----------------------------------------------------------------
+    # Catalogo Zonal (V2)
+    # ----------------------------------------------------------------
+
+    def load_catalogo(self):
+        """Carrega catalogo de zonais consolidados/concluidos."""
+        if not self._state.is_authenticated:
+            return
+
+        url = self._api_url("/zonal/catalogo?status=CONSOLIDATED,DONE")
+        self._state.set_loading("catalogo", True)
+        self._pending_catalogo_id = self._http.get(url)
+
+    # ----------------------------------------------------------------
     # Request handlers
     # ----------------------------------------------------------------
 
@@ -157,6 +177,26 @@ class MapeamentoController(QObject):
                 )
                 self._state.set_error("detail", f"Erro ao processar detalhe: {e}")
 
+        elif request_id == self._pending_catalogo_id:
+            self._pending_catalogo_id = None
+            self._state.set_loading("catalogo", False)
+            try:
+                from ...domain.models.zonal import CatalogoItem
+                data = json.loads(body)
+                items_raw = data if isinstance(data, list) else data.get("content", [])
+                items = [CatalogoItem.from_dict(item) for item in items_raw]
+                self._state.catalogo_items = items
+                QgsMessageLog.logMessage(
+                    f"[Catalogo] {len(items)} zonais carregados",
+                    PLUGIN_NAME, Qgis.Info,
+                )
+            except Exception as e:
+                QgsMessageLog.logMessage(
+                    f"Erro ao parsear catalogo: {e}\nBody: {body[:500]}",
+                    PLUGIN_NAME, Qgis.Warning,
+                )
+                self._state.set_error("catalogo", f"Erro ao processar catalogo: {e}")
+
     def _on_request_error(self, request_id, error_msg):
         if request_id == self._pending_list_id:
             self._pending_list_id = None
@@ -168,41 +208,60 @@ class MapeamentoController(QObject):
             self._state.set_loading("detail", False)
             self._state.set_error("detail", error_msg)
 
+        elif request_id == self._pending_catalogo_id:
+            self._pending_catalogo_id = None
+            self._state.set_loading("catalogo", False)
+            self._state.set_error("catalogo", error_msg)
+
     # ----------------------------------------------------------------
-    # Download
+    # Download (V1 — legado)
     # ----------------------------------------------------------------
 
     def download_classification(self, mapeamento_id, metodo_id):
-        """Inicia download da classificacao de um metodo via QgsTask."""
-        from ...infra.tasks.download_task import DownloadClassificationTask
-        from ...domain.services.gpkg_service import gpkg_path, gpkg_base_dir
+        """Download V1 deprecado — endpoints antigos removidos do backend."""
+        QgsMessageLog.logMessage(
+            f"[Download V1] Fluxo deprecado chamado para metodo {metodo_id}",
+            PLUGIN_NAME, Qgis.Warning,
+        )
+        self._state.set_error(
+            "download",
+            "Download V1 deprecado. Use o Catalogo Zonal para baixar dados."
+        )
+
+    # ----------------------------------------------------------------
+    # Download Zonal (V2)
+    # ----------------------------------------------------------------
+
+    def download_zonal_result(self, zonal_id):
+        """Inicia download do resultado zonal via checkout + FlatGeobuf."""
+        from ...infra.tasks.download_task import DownloadZonalTask
+        from ...domain.services.gpkg_service import gpkg_path_for_zonal, gpkg_base_dir
 
         if not self._state.is_authenticated or not self._token_provider:
             self._state.set_error("download", "Nao autenticado")
             return
-
-        download_url = self._api_url(
-            f"/mapeamento/metodo-geometria/metodo/{metodo_id}/download-shp"
-        )
-        base_dir = gpkg_base_dir(self._config.get("gpkg_base_dir"))
-        output_path = gpkg_path(base_dir, mapeamento_id, metodo_id)
 
         token = self._token_provider()
         if not token:
             self._state.set_error("download", "Token nao disponivel")
             return
 
-        task = DownloadClassificationTask(
+        checkout_url = self._api_url(f"/zonal/{zonal_id}/checkout")
+        download_url = self._api_url(f"/zonal/{zonal_id}/features")
+        base_dir = gpkg_base_dir(self._config.get("gpkg_base_dir"))
+        output_path = gpkg_path_for_zonal(base_dir, zonal_id)
+
+        task = DownloadZonalTask(
+            checkout_url=checkout_url,
             download_url=download_url,
             access_token=token,
             gpkg_output_path=output_path,
-            mapeamento_id=mapeamento_id,
-            metodo_id=metodo_id,
+            zonal_id=zonal_id,
         )
 
         task.signals.completed.connect(
-            lambda success, msg: self._on_download_completed(
-                success, msg, output_path, mapeamento_id, metodo_id
+            lambda success, msg: self._on_zonal_download_completed(
+                success, msg, output_path, zonal_id
             )
         )
         task.signals.status_message.connect(
@@ -212,6 +271,111 @@ class MapeamentoController(QObject):
         self._active_tasks.append(task)
         self._state.set_loading("download", True)
         QgsApplication.taskManager().addTask(task)
+
+    def _on_zonal_download_completed(self, success, message, gpkg_path, zonal_id):
+        self._cleanup_finished_tasks()
+        self._state.set_loading("download", False)
+        if success:
+            self.zonal_download_completed.emit(gpkg_path, zonal_id)
+            QgsMessageLog.logMessage(
+                f"Download zonal concluido: {gpkg_path}", PLUGIN_NAME, Qgis.Info,
+            )
+        else:
+            self._state.set_error("download", message)
+            QgsMessageLog.logMessage(
+                f"Download zonal falhou: {message}", PLUGIN_NAME, Qgis.Warning,
+            )
+
+    # ----------------------------------------------------------------
+    # Upload Zonal (V2)
+    # ----------------------------------------------------------------
+
+    def upload_zonal_edits(self, gpkg_path, conflict_strategy="REJECT_CONFLICTS"):
+        """Inicia upload de edicoes via fluxo zonal V2."""
+        from ...infra.tasks.upload_task import UploadZonalTask
+        from ...domain.services.gpkg_service import read_sidecar
+
+        if not self._state.is_authenticated or not self._token_provider:
+            self._state.set_error("upload", "Nao autenticado")
+            return
+
+        token = self._token_provider()
+        if not token:
+            self._state.set_error("upload", "Token nao disponivel")
+            return
+
+        sidecar = read_sidecar(gpkg_path)
+        edit_token = sidecar.get("editToken")
+        zonal_id = sidecar.get("zonalId")
+        zonal_version = sidecar.get("zonalVersion", 0)
+
+        if not edit_token or not zonal_id:
+            self._state.set_error(
+                "upload",
+                "Metadados de checkout nao encontrados. Faca novo download."
+            )
+            return
+
+        upload_url = self._api_url(f"/zonal/{zonal_id}/upload")
+
+        task = UploadZonalTask(
+            upload_url=upload_url,
+            access_token=token,
+            gpkg_source_path=gpkg_path,
+            zonal_id=zonal_id,
+            edit_token=edit_token,
+            expected_version=zonal_version,
+            conflict_strategy=conflict_strategy,
+        )
+
+        task.signals.completed.connect(
+            lambda success, msg: self._on_zonal_upload_completed(
+                success, msg, gpkg_path, zonal_id
+            )
+        )
+        task.signals.status_message.connect(
+            lambda msg: QgsMessageLog.logMessage(msg, PLUGIN_NAME, Qgis.Info)
+        )
+        task.signals.upload_progress.connect(
+            lambda data: self.upload_progress.emit(data)
+        )
+        task.signals.conflict_detected.connect(
+            lambda batch_uuid: self.conflict_detected.emit(batch_uuid)
+        )
+
+        self._active_tasks.append(task)
+        self._state.set_loading("upload", True)
+        QgsApplication.taskManager().addTask(task)
+
+    def _on_zonal_upload_completed(self, success, message, gpkg_path, zonal_id):
+        self._cleanup_finished_tasks()
+        self._state.set_loading("upload", False)
+        if success:
+            self._mark_uploaded(gpkg_path)
+            self.zonal_upload_completed.emit(gpkg_path, zonal_id)
+            QgsMessageLog.logMessage(
+                f"Upload zonal concluido: {gpkg_path}", PLUGIN_NAME, Qgis.Info,
+            )
+        else:
+            self._state.set_error("upload", message)
+            QgsMessageLog.logMessage(
+                f"Upload zonal falhou: {message}", PLUGIN_NAME, Qgis.Warning,
+            )
+
+    # ----------------------------------------------------------------
+    # Upload (V1 — legado)
+    # ----------------------------------------------------------------
+
+    def upload_classification(self, gpkg_path, mapeamento_id, metodo_id):
+        """Upload V1 deprecado."""
+        QgsMessageLog.logMessage(
+            f"[Upload V1] Fluxo deprecado chamado para metodo {metodo_id}",
+            PLUGIN_NAME, Qgis.Warning,
+        )
+        self._state.set_error(
+            "upload",
+            "Upload V1 deprecado. Baixe novamente via Catalogo Zonal."
+        )
 
     def _cleanup_finished_tasks(self):
         """Remove tasks finalizadas da lista de tasks ativas."""
@@ -235,50 +399,10 @@ class MapeamentoController(QObject):
                 f"Download falhou: {message}", PLUGIN_NAME, Qgis.Warning,
             )
 
-    # ----------------------------------------------------------------
-    # Upload
-    # ----------------------------------------------------------------
-
-    def upload_classification(self, gpkg_path, mapeamento_id, metodo_id):
-        """Inicia upload de features modificadas via QgsTask."""
-        from ...infra.tasks.upload_task import UploadClassificationTask
-
-        if not self._state.is_authenticated or not self._token_provider:
-            self._state.set_error("upload", "Nao autenticado")
-            return
-
-        upload_url = self._api_url("/mapeamento/metodo-geometria/upload")
-        token = self._token_provider()
-        if not token:
-            self._state.set_error("upload", "Token nao disponivel")
-            return
-
-        task = UploadClassificationTask(
-            upload_url=upload_url,
-            access_token=token,
-            gpkg_source_path=gpkg_path,
-            mapeamento_id=mapeamento_id,
-            metodo_id=metodo_id,
-        )
-
-        task.signals.completed.connect(
-            lambda success, msg: self._on_upload_completed(
-                success, msg, gpkg_path
-            )
-        )
-        task.signals.status_message.connect(
-            lambda msg: QgsMessageLog.logMessage(msg, PLUGIN_NAME, Qgis.Info)
-        )
-
-        self._active_tasks.append(task)
-        self._state.set_loading("upload", True)
-        QgsApplication.taskManager().addTask(task)
-
     def _on_upload_completed(self, success, message, gpkg_path):
         self._cleanup_finished_tasks()
         self._state.set_loading("upload", False)
         if success:
-            # Conta features MODIFIED antes de marcar como UPLOADED
             count = self._count_modified(gpkg_path)
             self._mark_uploaded(gpkg_path)
             self.upload_completed.emit(gpkg_path, count)
@@ -292,7 +416,7 @@ class MapeamentoController(QObject):
             )
 
     def _count_modified(self, gpkg_path):
-        """Conta features com status MODIFIED no GPKG."""
+        """Conta features com status MODIFIED ou NEW no GPKG."""
         from ...domain.models.enums import SyncStatusEnum
 
         layer = QgsVectorLayer(gpkg_path, "count_modified", "ogr")
@@ -305,12 +429,13 @@ class MapeamentoController(QObject):
 
         count = 0
         for feat in layer.getFeatures():
-            if feat.attribute(sync_idx) == SyncStatusEnum.MODIFIED.value:
+            status = feat.attribute(sync_idx)
+            if status in (SyncStatusEnum.MODIFIED.value, SyncStatusEnum.NEW.value):
                 count += 1
         return count
 
     def _mark_uploaded(self, gpkg_path):
-        """Marca features MODIFIED como UPLOADED no GPKG."""
+        """Marca features MODIFIED/NEW como UPLOADED no GPKG."""
         from ...domain.models.enums import SyncStatusEnum
         from datetime import datetime, timezone
 
@@ -326,7 +451,8 @@ class MapeamentoController(QObject):
         now_iso = datetime.now(timezone.utc).isoformat()
         layer.startEditing()
         for feat in layer.getFeatures():
-            if feat.attribute(sync_idx) == SyncStatusEnum.MODIFIED.value:
+            status = feat.attribute(sync_idx)
+            if status in (SyncStatusEnum.MODIFIED.value, SyncStatusEnum.NEW.value):
                 layer.changeAttributeValue(feat.id(), sync_idx, SyncStatusEnum.UPLOADED.value)
                 if ts_idx >= 0:
                     layer.changeAttributeValue(feat.id(), ts_idx, now_iso)
@@ -336,15 +462,16 @@ class MapeamentoController(QObject):
     # Edit tracking
     # ----------------------------------------------------------------
 
-    def connect_edit_tracking(self, layer, mapeamento_id, metodo_id):
+    def connect_edit_tracking(self, layer, mapeamento_id=None,
+                              metodo_id=None, zonal_id=None):
         """Conecta signals para rastrear edicoes na camada.
 
         Usa beforeCommitChanges para capturar IDs editados do editBuffer,
         e afterCommitChanges para persistir o _sync_status no GPKG.
+        Suporta contexto V1 (mapeamento/metodo) e V2 (zonal).
         """
-        # Armazena IDs pendentes por layer id para uso entre signals
         layer_id = layer.id()
-        self._pending_edit_fids[layer_id] = set()
+        self._pending_edit_fids[layer_id] = {"changed": set(), "added": set()}
 
         layer.beforeCommitChanges.connect(
             lambda: self._capture_edited_fids(layer)
@@ -354,27 +481,36 @@ class MapeamentoController(QObject):
         )
 
     def _capture_edited_fids(self, layer):
-        """Captura IDs das features alteradas antes do commit."""
+        """Captura IDs das features alteradas e adicionadas antes do commit."""
         layer_id = layer.id()
-        fids = set()
+        changed_fids = set()
+        added_fids = set()
 
         buf = layer.editBuffer()
         if buf:
             # Features com geometria alterada
-            fids.update(buf.changedGeometries().keys())
+            changed_fids.update(buf.changedGeometries().keys())
             # Features com atributos alterados
-            fids.update(buf.changedAttributeValues().keys())
+            changed_fids.update(buf.changedAttributeValues().keys())
+            # Features adicionadas (fid negativo)
+            added_fids.update(buf.addedFeatures().keys())
 
-        self._pending_edit_fids[layer_id] = fids
+        self._pending_edit_fids[layer_id] = {
+            "changed": changed_fids,
+            "added": added_fids,
+        }
 
     def _mark_edited_features(self, layer):
-        """Marca features editadas como MODIFIED no GPKG."""
+        """Marca features editadas como MODIFIED e novas como NEW no GPKG."""
         from ...domain.models.enums import SyncStatusEnum
         from datetime import datetime, timezone
 
         layer_id = layer.id()
-        fids = self._pending_edit_fids.get(layer_id, set())
-        if not fids:
+        fid_data = self._pending_edit_fids.get(layer_id, {"changed": set(), "added": set()})
+        changed_fids = fid_data.get("changed", set())
+        added_fids = fid_data.get("added", set())
+
+        if not changed_fids and not added_fids:
             return
 
         sync_idx = layer.fields().indexOf("_sync_status")
@@ -384,23 +520,37 @@ class MapeamentoController(QObject):
 
         now_iso = datetime.now(timezone.utc).isoformat()
         layer.startEditing()
-        for fid in fids:
+
+        # Marca features editadas como MODIFIED
+        for fid in changed_fids:
+            if fid in added_fids:
+                continue  # Features novas sao tratadas abaixo
             feat = layer.getFeature(fid)
             if not feat.isValid():
                 continue
             current_status = feat.attribute(sync_idx)
-            # Nao sobrescreve UPLOADED — usuario pode querer re-upload
             if current_status in (SyncStatusEnum.DOWNLOADED.value,
                                   SyncStatusEnum.MODIFIED.value):
                 layer.changeAttributeValue(fid, sync_idx, SyncStatusEnum.MODIFIED.value)
                 if ts_idx >= 0:
                     layer.changeAttributeValue(fid, ts_idx, now_iso)
+
+        # Marca features adicionadas como NEW
+        for fid in added_fids:
+            feat = layer.getFeature(fid)
+            if not feat.isValid():
+                continue
+            layer.changeAttributeValue(fid, sync_idx, SyncStatusEnum.NEW.value)
+            if ts_idx >= 0:
+                layer.changeAttributeValue(fid, ts_idx, now_iso)
+
         layer.commitChanges()
 
-        # Limpa fids pendentes
-        self._pending_edit_fids[layer_id] = set()
+        total = len(changed_fids - added_fids) + len(added_fids)
+        self._pending_edit_fids[layer_id] = {"changed": set(), "added": set()}
 
         QgsMessageLog.logMessage(
-            f"Edit tracking: {len(fids)} feature(s) marcada(s) como MODIFIED",
+            f"Edit tracking: {len(changed_fids - added_fids)} MODIFIED, "
+            f"{len(added_fids)} NEW",
             PLUGIN_NAME, Qgis.Info,
         )

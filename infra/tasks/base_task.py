@@ -11,6 +11,8 @@ class TaskSignals(QObject):
     progress_changed = pyqtSignal(int)          # 0-100
     status_message = pyqtSignal(str)            # mensagem de progresso
     completed = pyqtSignal(bool, str)           # (success, message)
+    upload_progress = pyqtSignal(dict)          # UploadBatchStatus como dict
+    conflict_detected = pyqtSignal(str)         # batchUuid
 
 
 class SatIrrigaTask(QgsTask):

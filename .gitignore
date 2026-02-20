@@ -170,5 +170,6 @@ config.json
 !LICENSE.md
 !README.md
 !README_EN.md
+!CHANGELOG.md
 *.zip
 

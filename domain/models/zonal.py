@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, List
 
 
 @dataclass
@@ -51,4 +51,27 @@ class Zonal:
             metodo_id=data.get("metodoId", data.get("metodo_id", 0)),
             status=data.get("status", ""),
             geometrias=geometrias,
+        )
+
+
+@dataclass
+class CatalogoItem:
+    id: int
+    descricao: str
+    status: str
+    processed_at: Optional[str] = None
+    result_count: int = 0
+    total_area_ha: float = 0.0
+    bbox: Optional[List[float]] = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CatalogoItem":
+        return cls(
+            id=data.get("id", 0),
+            descricao=data.get("descricao", ""),
+            status=data.get("status", ""),
+            processed_at=data.get("processedAt"),
+            result_count=data.get("resultCount", 0),
+            total_area_ha=data.get("totalAreaHa", 0.0),
+            bbox=data.get("bbox"),
         )

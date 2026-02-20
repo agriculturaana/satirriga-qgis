@@ -43,6 +43,10 @@ class FakeAppState:
         self.session_countdown = MockSignal(int)
         self.mapeamentos_changed = MockSignal(object)
         self.selected_mapeamento_changed = MockSignal(object)
+        self.catalogo_changed = MockSignal(list)
+        self.upload_progress_changed = MockSignal(dict)
+        self.conflict_detected = MockSignal(str)
+        self.upload_batch_completed = MockSignal(str, dict)
         self.loading_changed = MockSignal(str, bool)
         self.error_occurred = MockSignal(str, str)
 
@@ -50,6 +54,7 @@ class FakeAppState:
         self._user = None
         self._mapeamentos = None
         self._selected_mapeamento = None
+        self._catalogo_items = []
 
     @property
     def is_authenticated(self):
@@ -88,6 +93,15 @@ class FakeAppState:
         self._selected_mapeamento = value
         self.selected_mapeamento_changed.emit(value)
 
+    @property
+    def catalogo_items(self):
+        return self._catalogo_items
+
+    @catalogo_items.setter
+    def catalogo_items(self, value):
+        self._catalogo_items = value
+        self.catalogo_changed.emit(value)
+
     def set_loading(self, operation, is_loading):
         self.loading_changed.emit(operation, is_loading)
 
@@ -99,6 +113,7 @@ class FakeAppState:
         self.user = None
         self._mapeamentos = None
         self._selected_mapeamento = None
+        self._catalogo_items = []
 
 
 class TestAppState:
@@ -110,6 +125,7 @@ class TestAppState:
         assert self.state.user is None
         assert self.state.mapeamentos is None
         assert self.state.selected_mapeamento is None
+        assert self.state.catalogo_items == []
 
     def test_set_authenticated_emits_signal(self):
         self.state.is_authenticated = True
@@ -169,6 +185,7 @@ class TestAppState:
         self.state.user = {"name": "Test"}
         self.state.mapeamentos = [1, 2, 3]
         self.state.selected_mapeamento = {"id": 1}
+        self.state.catalogo_items = [{"id": 42}]
 
         self.state.reset()
 
@@ -176,9 +193,39 @@ class TestAppState:
         assert self.state.user is None
         assert self.state._mapeamentos is None
         assert self.state._selected_mapeamento is None
+        assert self.state._catalogo_items == []
 
     def test_reset_emits_auth_changed(self):
         self.state.is_authenticated = True
         emit_count_before = self.state.auth_state_changed.call_count
         self.state.reset()
         assert self.state.auth_state_changed.call_count > emit_count_before
+
+
+class TestCatalogoState:
+    def setup_method(self):
+        self.state = FakeAppState()
+
+    def test_set_catalogo_items_emits_signal(self):
+        items = [{"id": 1}, {"id": 2}]
+        self.state.catalogo_items = items
+        assert self.state.catalogo_items == items
+        assert self.state.catalogo_changed.call_count == 1
+        assert self.state.catalogo_changed.last_args == (items,)
+
+    def test_set_empty_catalogo(self):
+        self.state.catalogo_items = []
+        assert self.state.catalogo_items == []
+        assert self.state.catalogo_changed.call_count == 1
+
+    def test_catalogo_reset_on_full_reset(self):
+        self.state.catalogo_items = [{"id": 99}]
+        self.state.reset()
+        assert self.state._catalogo_items == []
+
+    def test_v2_signals_exist(self):
+        """Verifica que os signals V2 existem no state."""
+        assert hasattr(self.state, "catalogo_changed")
+        assert hasattr(self.state, "upload_progress_changed")
+        assert hasattr(self.state, "conflict_detected")
+        assert hasattr(self.state, "upload_batch_completed")

@@ -121,7 +121,6 @@ class SatIrrigaPlugin:
         self._auth_interceptor.update_allowed_hosts(hosts)
 
         # Adia restauracao de sessao para apos o QGIS finalizar o startup
-        # (evita SIGABRT por chamada de rede durante a splash screen)
         QTimer.singleShot(500, self._auth_controller.try_restore_session)
 
         self._log("Plugin v2 carregado")
@@ -172,7 +171,6 @@ class SatIrrigaPlugin:
             state=self._state,
             auth_controller=self._auth_controller,
         )
-        # Substitui o _user_label no header pelo SessionHeader
         old_label = self.dock._user_label
         self.dock._header.replaceWidget(old_label, session_header)
         old_label.deleteLater()
@@ -204,11 +202,28 @@ class SatIrrigaPlugin:
         logs_tab = LogsTab()
         self.dock.set_page_widget(SatIrrigaDock.PAGE_LOGS, logs_tab)
 
-        # Conecta download -> carregar layer no QGIS + atualizar camadas tab
+        # V1: download -> carregar layer no QGIS
         self._mapeamento_controller.download_completed.connect(
             lambda path, m_id, met_id: self._on_download_completed(
                 path, m_id, met_id, camadas_tab
             )
+        )
+
+        # V2: zonal download -> carregar layer no QGIS
+        self._mapeamento_controller.zonal_download_completed.connect(
+            lambda path, zonal_id: self._on_zonal_download_completed(
+                path, zonal_id, camadas_tab
+            )
+        )
+
+        # V2: upload progress bridge -> state
+        self._mapeamento_controller.upload_progress.connect(
+            lambda data: self._state.upload_progress_changed.emit(data)
+        )
+
+        # V2: conflict detected -> placeholder
+        self._mapeamento_controller.conflict_detected.connect(
+            self._on_conflict_detected
         )
 
         # Badge de camadas modificadas
@@ -229,6 +244,7 @@ class SatIrrigaPlugin:
             original_refresh()
             modified_total = sum(
                 entry.get("sync_counts", {}).get("MODIFIED", 0)
+                + entry.get("sync_counts", {}).get("NEW", 0)
                 for entry in camadas_tab._gpkg_list
             )
             camadas_btn.set_badge(modified_total)
@@ -236,11 +252,10 @@ class SatIrrigaPlugin:
         camadas_tab._refresh_list = refresh_with_badge
 
     def _on_download_completed(self, gpkg_path, mapeamento_id, metodo_id, camadas_tab):
-        """Carrega GPKG no projeto QGIS apos download."""
+        """Carrega GPKG V1 no projeto QGIS apos download."""
         from qgis.core import QgsProject, QgsVectorLayer
         from .domain.services.gpkg_service import layer_group_name
 
-        # Cria grupo no layer tree
         root = QgsProject.instance().layerTreeRoot()
         mapeamento = self._state.selected_mapeamento
         group_name = layer_group_name(
@@ -250,16 +265,14 @@ class SatIrrigaPlugin:
         if not group:
             group = root.addGroup(group_name)
 
-        # Carrega layer editavel
         layer = QgsVectorLayer(gpkg_path, f"Metodo {metodo_id}", "ogr")
         if layer.isValid():
             QgsProject.instance().addMapLayer(layer, False)
             group.addLayer(layer)
             self._log(f"Camada carregada: {gpkg_path}")
 
-            # Conecta edit tracking
             self._mapeamento_controller.connect_edit_tracking(
-                layer, mapeamento_id, metodo_id,
+                layer, mapeamento_id=mapeamento_id, metodo_id=metodo_id,
             )
 
             if self._config_repo.get("auto_zoom_on_load"):
@@ -268,5 +281,106 @@ class SatIrrigaPlugin:
         else:
             self._log(f"Falha ao carregar GPKG: {gpkg_path}", Qgis.Warning)
 
-        # Atualiza lista de camadas locais
         camadas_tab.refresh()
+
+    def _on_zonal_download_completed(self, gpkg_path, zonal_id, camadas_tab):
+        """Carrega GPKG V2 (zonal) no projeto QGIS apos download."""
+        from qgis.core import QgsProject, QgsVectorLayer
+        from .domain.services.gpkg_service import layer_group_name
+
+        root = QgsProject.instance().layerTreeRoot()
+        group_name = layer_group_name(f"Zonal {zonal_id}")
+        group = root.findGroup(group_name)
+        if not group:
+            group = root.addGroup(group_name)
+
+        layer = QgsVectorLayer(gpkg_path, f"Zonal {zonal_id}", "ogr")
+        if layer.isValid():
+            QgsProject.instance().addMapLayer(layer, False)
+            group.addLayer(layer)
+            self._log(f"Camada V2 carregada: {gpkg_path}")
+
+            self._mapeamento_controller.connect_edit_tracking(
+                layer, zonal_id=zonal_id,
+            )
+
+            if self._config_repo.get("auto_zoom_on_load"):
+                self.iface.mapCanvas().setExtent(layer.extent())
+                self.iface.mapCanvas().refresh()
+        else:
+            self._log(f"Falha ao carregar GPKG V2: {gpkg_path}", Qgis.Warning)
+
+        camadas_tab.refresh()
+
+    def _on_conflict_detected(self, batch_uuid):
+        """Handler para conflitos detectados durante upload."""
+        self._log(f"Conflitos detectados no batch {batch_uuid}")
+
+        # Busca conflitos via API
+        url = self._mapeamento_controller._api_url(
+            f"/zonal/upload/{batch_uuid}/conflicts"
+        )
+        token = self._auth_controller.get_access_token()
+        if not token:
+            self._log("Token nao disponivel para buscar conflitos", Qgis.Warning)
+            return
+
+        import requests
+        try:
+            resp = requests.get(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            self._log(f"Erro ao buscar conflitos: {e}", Qgis.Warning)
+            return
+
+        from .domain.models.conflict import ConflictSet
+        from .ui.dialogs.conflict_dialog import ConflictResolutionDialog
+
+        conflict_set = ConflictSet.from_dict(data)
+
+        dialog = ConflictResolutionDialog(
+            conflict_set, parent=self.iface.mainWindow()
+        )
+        dialog.resolved.connect(
+            lambda decisions: self._resolve_conflicts(batch_uuid, decisions)
+        )
+        dialog.exec_()
+
+    def _resolve_conflicts(self, batch_uuid, decisions):
+        """Envia resolucoes de conflitos para o servidor."""
+        import json
+        import requests
+
+        url = self._mapeamento_controller._api_url(
+            f"/zonal/upload/{batch_uuid}/resolve"
+        )
+        token = self._auth_controller.get_access_token()
+        if not token:
+            self._log("Token nao disponivel para resolver conflitos", Qgis.Warning)
+            return
+
+        try:
+            resp = requests.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                data=json.dumps({"decisions": decisions}),
+                timeout=30,
+            )
+            resp.raise_for_status()
+            self._log(
+                f"Conflitos resolvidos para batch {batch_uuid}: "
+                f"{len(decisions)} decisoes enviadas"
+            )
+        except Exception as e:
+            self._log(f"Erro ao resolver conflitos: {e}", Qgis.Warning)
+            self._state.set_error(
+                "upload", f"Erro ao resolver conflitos: {e}"
+            )

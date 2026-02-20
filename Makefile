@@ -20,7 +20,7 @@ SRC_PY = $(shell find $(SRC_DIRS) -name '*.py' 2>/dev/null)
 ROOT_PY = __init__.py plugin.py
 
 # Extra files to deploy
-EXTRAS = metadata.txt icon.png logo.png
+EXTRAS = metadata.txt icon.png logo.png CHANGELOG.md
 
 # Directories to deploy in full
 EXTRA_DIRS = assets i18n
@@ -187,7 +187,7 @@ publish: compile validate
 	@cp $(ROOT_PY) $(BUILD_DIR)/
 	@cp $(COMPILED_RESOURCE_FILES) $(BUILD_DIR)/
 	@cp metadata.txt LICENSE icon.png $(BUILD_DIR)/
-	@cp logo.png README.txt README.html $(BUILD_DIR)/ 2>/dev/null || true
+	@cp logo.png CHANGELOG.md README.txt README.html $(BUILD_DIR)/ 2>/dev/null || true
 	@# Source directories (somente .py)
 	@for dir in $(SRC_DIRS); do \
 		find $$dir -name '*.py' | while read f; do \

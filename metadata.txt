@@ -2,11 +2,46 @@
 name=SatIrriga QGIS
 qgisMinimumVersion=3.22
 description=QGIS client for the SatIrriga platform (ANA/INPE). Browse, download, edit, and submit satellite-based irrigation maps.
-version=2.0.0
+version=2.1.0
 author=Tharles de Sousa Andrade | ANA | INPE
 email=irtharles@gmail.com
 
-about=SatIrriga QGIS is the official desktop client for the SatIrriga platform, a satellite-based irrigation monitoring system developed jointly by ANA (Brazil's National Water and Sanitation Agency) and INPE (Brazil's National Institute for Space Research). The plugin enables a complete field-validation workflow without leaving the QGIS environment: authenticate securely via Single Sign-On (OIDC/PKCE through Keycloak); browse and query irrigation mapping campaigns; download classification layers as editable GeoPackage files; refine geometries using the full suite of QGIS sketching and editing tools; and submit the revised data back to the SatIrriga server. Designed for analysts and technicians who review remote-sensing-derived irrigation maps, the plugin streamlines the review-and-correction cycle that is central to the SatIrriga quality-assurance process.
+about=SatIrriga QGIS is the official desktop client for the SatIrriga platform, a satellite-based irrigation monitoring system developed jointly by ANA (Brazil's National Water and Sanitation Agency) and INPE (Brazil's National Institute for Space Research). The plugin enables a complete field-validation workflow without leaving the QGIS environment: authenticate securely via Single Sign-On (OIDC/PKCE through Keycloak); browse the zonal catalog and download geospatial results as editable GeoPackage files via FlatGeobuf; refine geometries using the full suite of QGIS sketching and editing tools; and submit revisions back to the Feature Server with asynchronous processing and conflict resolution. Designed for analysts and technicians who review remote-sensing-derived irrigation maps, the plugin streamlines the review-and-correction cycle that is central to the SatIrriga quality-assurance process.
+
+changelog=
+  2.1.0
+  - New zonal-based workflow (Feature Server): checkout, FlatGeobuf download, async upload with polling
+  - Zonal Catalog tab for browsing and downloading CONSOLIDATED/DONE zonals
+  - Upload progress widget with real-time batch status and cancel button
+  - Conflict resolution dialog for feature-level merge decisions during upload
+  - Sidecar .satirriga.json metadata file for edit tokens, ETag caching and versioning
+  - Edit tracking now detects new features (addedFeatures) and marks them as NEW
+  - New domain models: CatalogoItem, UploadBatchStatus, ConflictItem, ConflictSet
+  - New enums: ZonalStatusEnum, UploadBatchStatusEnum, ConflictResolutionEnum
+  - Dual V1/V2 display in Camadas tab with visual indicators
+  - V1 download/upload deprecated (legacy GPKGs remain viewable)
+  - 124 unit tests (41 new)
+  2.0.0
+  - Complete plugin rewrite with Clean Architecture (UI -> App -> Domain <- Infra)
+  - SSO authentication via Keycloak OIDC PKCE with automatic session restore
+  - Activity bar navigation (Home, Mapeamentos, Camadas, Config, Logs)
+  - Paginated mapping list with search, server-side sorting and expandable detail panel
+  - SHP ZIP download with automatic GeoPackage conversion and sync fields
+  - Multipart upload of modified features
+  - Edit tracking via beforeCommitChanges/afterCommitChanges
+  - Local layers tab with colored sync status and actions (Open, Upload, Remove)
+  - Settings tab (API URL, SSO URL, GPKG directory, page size, auto-zoom)
+  - Logs tab integrated with QgsMessageLog
+  - 83 unit tests
+  1.0.0
+  - Initial plugin version generated with QGIS Plugin Builder
+  - Basic Keycloak authentication (login/logout)
+  - Mapping campaign listing from SatIrriga API
+  - Mapping method selection and visualization
+  - Classification download as vector layer
+  - QDockWidget interface with tabs (Login, Mapeamentos, Metodos, Visualizar)
+  - Download progress bar
+  - Raster (COG) and vector layer loading into QGIS project
 
 tracker=https://github.com/agriculturaana/satirriga-qgis/issues
 repository=https://github.com/agriculturaana/satirriga-qgis
@@ -17,6 +52,6 @@ tags=python,irrigation,remote-sensing,mapping,geopackage
 homepage=https://github.com/agriculturaana/satirriga-qgis
 category=Vector
 icon=icon.png
-experimental=True
+experimental=False
 deprecated=False
 server=False

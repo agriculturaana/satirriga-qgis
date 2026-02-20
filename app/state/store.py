@@ -13,6 +13,12 @@ class AppState(QObject):
     mapeamentos_changed = pyqtSignal(object)         # PaginatedResult
     selected_mapeamento_changed = pyqtSignal(object) # Mapeamento | None
 
+    # Catalogo zonal (V2)
+    catalogo_changed = pyqtSignal(list)              # List[CatalogoItem]
+    upload_progress_changed = pyqtSignal(dict)       # UploadBatchStatus dict
+    conflict_detected = pyqtSignal(str)              # batchUuid
+    upload_batch_completed = pyqtSignal(str, dict)   # batchUuid, summary
+
     # UI feedback
     loading_changed = pyqtSignal(str, bool)          # (operation, is_loading)
     error_occurred = pyqtSignal(str, str)             # (operation, message)
@@ -23,6 +29,7 @@ class AppState(QObject):
         self._user = None
         self._mapeamentos = None
         self._selected_mapeamento = None
+        self._catalogo_items = []
 
     @property
     def is_authenticated(self):
@@ -61,6 +68,15 @@ class AppState(QObject):
         self._selected_mapeamento = value
         self.selected_mapeamento_changed.emit(value)
 
+    @property
+    def catalogo_items(self):
+        return self._catalogo_items
+
+    @catalogo_items.setter
+    def catalogo_items(self, value):
+        self._catalogo_items = value
+        self.catalogo_changed.emit(value)
+
     def set_loading(self, operation, is_loading):
         self.loading_changed.emit(operation, is_loading)
 
@@ -72,3 +88,4 @@ class AppState(QObject):
         self.user = None
         self._mapeamentos = None
         self._selected_mapeamento = None
+        self._catalogo_items = []
