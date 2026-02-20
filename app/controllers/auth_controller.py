@@ -209,8 +209,8 @@ class AuthController(QObject):
     # ----------------------------------------------------------------
 
     def cleanup(self):
-        """Limpeza ao descarregar plugin."""
+        """Limpeza ao descarregar plugin — faz logout no SSO."""
         if self._session_manager:
-            self._session_manager.stop()
+            self._session_manager.do_logout()
         if self._oidc_flow:
             self._oidc_flow.cleanup()
