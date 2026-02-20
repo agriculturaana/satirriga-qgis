@@ -49,7 +49,7 @@ class MapeamentoController(QObject):
         if not self._state.is_authenticated:
             return
 
-        url = self._api_url("/zonal/catalogo?status=CONSOLIDATED,DONE")
+        url = self._api_url("/zonal/catalogo?status=CONSOLIDATED")
         self._state.set_loading("catalogo", True)
         self._pending_catalogo_id = self._http.get(url)
 
@@ -64,7 +64,10 @@ class MapeamentoController(QObject):
             try:
                 from ...domain.models.zonal import CatalogoItem
                 data = json.loads(body)
-                items_raw = data if isinstance(data, list) else data.get("content", [])
+                if isinstance(data, list):
+                    items_raw = data
+                else:
+                    items_raw = data.get("data") or data.get("content") or []
                 items = [CatalogoItem.from_dict(item) for item in items_raw]
                 self._state.catalogo_items = items
                 QgsMessageLog.logMessage(
@@ -103,7 +106,7 @@ class MapeamentoController(QObject):
             return
 
         checkout_url = self._api_url(f"/zonal/{zonal_id}/checkout")
-        download_url = self._api_url(f"/zonal/{zonal_id}/features")
+        download_url = self._api_url(f"/zonal/{zonal_id}/download-result")
         base_dir = gpkg_base_dir(self._config.get("gpkg_base_dir"))
         output_path = gpkg_path_for_zonal(base_dir, zonal_id)
 
