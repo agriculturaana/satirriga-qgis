@@ -6,6 +6,8 @@ import tempfile
 import time
 import zipfile
 
+from urllib.parse import urlparse
+
 import requests
 
 from qgis.core import (
@@ -155,6 +157,11 @@ class UploadZonalTask(SatIrrigaTask):
             if not poll_url:
                 self._exception = Exception("Servidor nao retornou pollUrl")
                 return False
+
+            # pollUrl pode ser relativo ("/api/..."), precisa de URL absoluta
+            if poll_url.startswith("/"):
+                parsed = urlparse(self._url)
+                poll_url = f"{parsed.scheme}://{parsed.netloc}{poll_url}"
 
             self.setProgress(50)
 

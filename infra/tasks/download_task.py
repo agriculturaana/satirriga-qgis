@@ -45,9 +45,12 @@ class DownloadZonalTask(SatIrrigaTask):
                 self._checkout_url, headers=headers, timeout=30,
             )
             if checkout_resp.status_code == 409:
-                self._exception = Exception(
-                    "Zonal em edicao por outro usuario"
-                )
+                try:
+                    err_body = checkout_resp.json()
+                    err_msg = err_body.get("message", "Zonal bloqueado (409)")
+                except Exception:
+                    err_msg = "Zonal bloqueado (409)"
+                self._exception = Exception(err_msg)
                 return False
             checkout_resp.raise_for_status()
 
