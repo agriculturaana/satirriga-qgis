@@ -2,13 +2,27 @@
 name=SatIrriga QGIS
 qgisMinimumVersion=3.22
 description=QGIS client for the SatIrriga platform (ANA/INPE). Browse, download, edit, and submit satellite-based irrigation maps.
-version=2.1.0
+version=2.2.0
 author=Tharles de Sousa Andrade | ANA | INPE
 email=irtharles@gmail.com
 
 about=SatIrriga QGIS is the official desktop client for the SatIrriga platform, a satellite-based irrigation monitoring system developed jointly by ANA (Brazil's National Water and Sanitation Agency) and INPE (Brazil's National Institute for Space Research). The plugin enables a complete field-validation workflow without leaving the QGIS environment: authenticate securely via Single Sign-On (OIDC/PKCE through Keycloak); browse the zonal catalog and download geospatial results as editable GeoPackage files via FlatGeobuf; refine geometries using the full suite of QGIS sketching and editing tools; and submit revisions back to the Feature Server with asynchronous processing and conflict resolution. Designed for analysts and technicians who review remote-sensing-derived irrigation maps, the plugin streamlines the review-and-correction cycle that is central to the SatIrriga quality-assurance process.
 
 changelog=
+  2.2.0
+  - Typed attribute editor dialog with collapsible sections and field coercion
+  - Error dialog with expandable details
+  - HTTP logging for all network calls
+  - Fix: segfault on startup caused by QNetworkReply GC in lambdas
+  - Fix: edit tracking not detecting attribute changes (missing UPLOADED->MODIFIED transition)
+  - Fix: new features not tracked (temporary negative FIDs from editBuffer)
+  - Fix: stale cache after dataProvider writes (added forceReload)
+  - Fix: dialog save not enabling upload button (feature_saved signal propagation)
+  - Refactor: download/upload tasks migrated to osgeo.ogr (thread-safe)
+  - Refactor: edit tracking uses dataProvider batch with QTimer defer
+  - Refactor: plugin lazy init with deferred imports
+  - Removed V1 legacy flow, Zonal Catalog is now the main screen
+  - 45 integration tests (187 total)
   2.1.0
   - New zonal-based workflow (Feature Server): checkout, FlatGeobuf download, async upload with polling
   - Zonal Catalog tab for browsing and downloading CONSOLIDATED/DONE zonals

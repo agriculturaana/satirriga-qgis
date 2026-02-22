@@ -5,6 +5,44 @@ Todas as mudancas notaveis do SatIrriga QGIS Plugin serao documentadas neste arq
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
 e o versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
+## [2.2.0] - 2026-02-22
+
+### Adicionado
+
+- **Editor de atributos tipado:** dialog com secoes colapsaveis, widgets por tipo (combo, data, numerico, multiline), schema de campos com coercao de tipos e agrupamento semantico
+- **Dialog de erro intuitivo:** componente visual com resumo + detalhes expandiveis, substituindo mensagens cruas no log
+- **Logs HTTP detalhados:** todas as chamadas HTTP agora logam `[HTTP] METHOD url (auth=bool)` com status e tamanho da resposta
+- **Tooltips em toda a UI:** todos os botoes e controles possuem tooltips descritivos
+- **45 testes de integracao:** cobertura completa da conversao GDAL/OGR (FGB->GPKG download, GPKG export+ZIP upload, roundtrip)
+- **Target `make test-integration`** para executar testes de integracao separadamente
+
+### Corrigido
+
+- **Segfault no startup do plugin:** `QNetworkReply` capturado em lambdas era coletado pelo GC do Python antes do signal `finished` disparar, causando acesso a ponteiro C++ invalido. Corrigido em `session_manager`, `auth_controller`, `config_controller` e `client` guardando referencia em `self`
+- **Edit tracking nao detectava alteracoes de atributos:** transicao `UPLOADED -> MODIFIED` estava ausente — features ja enviadas ao servidor nao eram re-marcadas ao editar novamente
+- **Features novas nao rastreadas:** `addedFeatures()` retornava FIDs temporarios negativos que nao existiam apos commit. Substituido por scan de `_sync_status` NULL
+- **Cache stale na tabela de atributos:** apos `dataProvider().changeAttributeValues()`, a layer QGIS mostrava dados antigos. Corrigido com `forceReload()` apos cada escrita via provider
+- **Botao Enviar nao habilitava apos editar via dialog:** signal `feature_saved` do dialog nao era propagado ate a aba Camadas. Adicionado signal no `AttributeEditController` conectado ao `edit_tracking_done`
+- **Crash no `_close_dialog`:** `close()` emitia signal `finished` sincronamente, setando `_dialog=None` antes de `deleteLater()` na mesma call stack
+- **Checkout 409 e pollUrl relativo:** corrigido parsing de URL relativa no polling de upload e mensagem de erro ao tentar checkout ja ativo
+- **Endpoints da API zonal:** corrigido paths e parsing de respostas do Feature Server
+- **FlatGeobuf corrompido:** adicionada deteccao de FGB invalido com log de metadados para diagnostico
+- **Logout no SSO:** plugin agora executa logout no Keycloak ao ser descarregado
+
+### Alterado
+
+- **Tasks migradas para osgeo.ogr:** `DownloadZonalTask` e `UploadZonalTask` agora usam GDAL/OGR puro ao inves de `QgsVectorLayer`/`QgsVectorFileWriter`, evitando segfault por criar objetos QGIS em worker thread
+- **Edit tracking refatorado:** usa `dataProvider().changeAttributeValues()` em batch com `QTimer.singleShot(0)` para defer, eliminando nested signal loops e melhorando performance
+- **Plugin com lazy init:** imports e inicializacao de controladores diferidos para `_ensure_initialized()`, protegendo contra crash no startup com `try/except`
+- **Fluxo V1 removido:** tela de Mapeamentos removida, Catalogo Zonal e agora a tela principal
+- **Ortografia e UI:** correcoes de acentuacao e visibilidade em tooltips e labels
+
+### Compatibilidade
+
+- QGIS >= 3.22, GDAL >= 3.4
+- GPKGs V1 legados continuam visiveis (somente leitura)
+- Total de testes: 187 (142 unitarios + 45 integracao)
+
 ## [2.1.0] - 2026-02-19
 
 ### Adicionado
