@@ -44,7 +44,7 @@ REQUIRED_FILES = metadata.txt __init__.py plugin.py resources.py icon.png LICENS
 # Campos obrigatorios no metadata.txt (OSGEO)
 REQUIRED_META = name qgisMinimumVersion description about version author email repository tracker
 
-.PHONY: default compile deploy test test-unit clean package publish validate help
+.PHONY: default compile deploy test test-unit test-integration clean derase package publish validate pylint transup transcompile help
 
 default: help
 
@@ -54,7 +54,9 @@ help:
 	@echo "  deploy       — Copia plugin para diretorio QGIS local"
 	@echo "  test         — Executa todos os testes (pytest)"
 	@echo "  test-unit    — Executa somente testes unitarios"
+	@echo "  test-integration — Executa testes de integracao (GDAL/OGR)"
 	@echo "  clean        — Remove arquivos gerados"
+	@echo "  derase       — Remove plugin do diretorio QGIS local"
 	@echo "  package      — Cria ZIP para distribuicao (requer VERSION=vX.Y.Z)"
 	@echo "  publish      — Valida e empacota para publicar no plugins.qgis.org"
 	@echo "  validate     — Valida metadata e estrutura sem empacotar"
@@ -92,6 +94,10 @@ test: compile
 test-unit: compile
 	@echo "Executando testes unitarios..."
 	python3 -m pytest tests/unit/ -v --tb=short
+
+test-integration: compile
+	@echo "Executando testes de integracao..."
+	python3 -m pytest tests/integration/ -v --tb=short
 
 clean:
 	@echo "Limpando arquivos gerados..."
