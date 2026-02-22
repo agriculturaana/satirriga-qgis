@@ -85,10 +85,13 @@ class SessionManager(QObject):
         req.setRawHeader(b"Content-Type", b"application/x-www-form-urlencoded")
 
         reply = self._nam.post(req, QByteArray(data))
+        # Guarda referencia para evitar GC do wrapper Python antes do signal
+        self._refresh_reply = reply
         reply.finished.connect(lambda: self._on_refresh_finished(reply))
 
     def _on_refresh_finished(self, reply):
         """Processa resposta do refresh."""
+        self._refresh_reply = None
         status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
         body = bytes(reply.readAll())
         reply.deleteLater()
@@ -134,9 +137,12 @@ class SessionManager(QObject):
         req.setRawHeader(b"Content-Type", b"application/x-www-form-urlencoded")
 
         reply = self._nam.post(req, QByteArray(data))
+        # Guarda referencia para evitar GC do wrapper Python antes do signal
+        self._restore_reply = reply
         reply.finished.connect(lambda: self._on_restore_finished(reply, callback))
 
     def _on_restore_finished(self, reply, callback):
+        self._restore_reply = None
         status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
         body = bytes(reply.readAll())
         reply.deleteLater()

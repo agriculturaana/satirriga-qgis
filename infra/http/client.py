@@ -79,10 +79,12 @@ class HttpClient(QObject):
             status_code = 0
 
         body = bytes(reply.readAll())
+
+        # Captura errorString ANTES de deleteLater (evita acesso a C++ deletado)
+        error_msg = reply.errorString() if error else ""
         reply.deleteLater()
 
         if error and status_code == 0:
-            error_msg = reply.errorString()
             QgsMessageLog.logMessage(
                 f"[HTTP] ERRO DE REDE {req_url} -> {error_msg}",
                 PLUGIN_NAME, Qgis.Warning,

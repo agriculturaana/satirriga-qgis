@@ -81,10 +81,13 @@ class AuthController(QObject):
         req.setRawHeader(b"Content-Type", b"application/x-www-form-urlencoded")
 
         reply = self._nam.post(req, QByteArray(data))
+        # Guarda referencia para evitar GC do wrapper Python antes do signal
+        self._token_reply = reply
         reply.finished.connect(lambda: self._on_token_response(reply))
 
     def _on_token_response(self, reply):
         """Processa resposta do token endpoint."""
+        self._token_reply = None
         status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
         body = bytes(reply.readAll())
         reply.deleteLater()

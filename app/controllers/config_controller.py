@@ -47,14 +47,18 @@ class ConfigController(QObject):
         req.setRawHeader(b"Accept", b"application/json")
 
         reply = nam.get(req)
+        # Guarda referencia para evitar GC do wrapper Python antes do signal
+        self._test_reply = reply
         reply.finished.connect(lambda: self._on_test_finished(reply, callback))
 
     def _on_test_finished(self, reply, callback):
+        self._test_reply = None
         status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
         body = bytes(reply.readAll())
+        url = reply.url().toString()
+        error_string = reply.errorString()
         reply.deleteLater()
 
-        url = reply.url().toString()
         if status and 200 <= status < 300:
             QgsMessageLog.logMessage(
                 f"[HTTP] {status} {url}", PLUGIN_NAME, Qgis.Info,
@@ -67,7 +71,7 @@ class ConfigController(QObject):
             callback(False, f"Servidor respondeu HTTP {status}")
         else:
             QgsMessageLog.logMessage(
-                f"[HTTP] ERRO DE REDE {url} -> {reply.errorString()}",
+                f"[HTTP] ERRO DE REDE {url} -> {error_string}",
                 PLUGIN_NAME, Qgis.Warning,
             )
-            callback(False, f"Erro de rede: {reply.errorString()}")
+            callback(False, f"Erro de rede: {error_string}")
