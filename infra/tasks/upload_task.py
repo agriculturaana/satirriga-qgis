@@ -1,4 +1,8 @@
-"""Task para upload de edicoes zonais (export + POST + polling)."""
+"""Task para upload de edicoes zonais (export + POST + polling).
+
+Usa osgeo.ogr para export GPKG em worker thread,
+evitando criar QgsVectorLayer fora da main thread.
+"""
 
 import os
 import shutil
@@ -10,11 +14,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from qgis.core import (
-    QgsVectorLayer, QgsVectorFileWriter, QgsCoordinateReferenceSystem,
-    QgsCoordinateTransformContext, QgsFields, QgsField, QgsFeature, Qgis,
-)
-from qgis.PyQt.QtCore import QVariant
+from qgis.core import Qgis
 
 from .base_task import SatIrrigaTask
 from ...domain.models.enums import UploadBatchStatusEnum
@@ -47,11 +47,20 @@ class UploadZonalTask(SatIrrigaTask):
             self.setProgress(5)
 
             # ----------------------------------------------------------
-            # 1. Export GPKG (0-25%)
+            # 1. Export GPKG via GDAL/OGR (0-25%)
             # ----------------------------------------------------------
-            src_layer = QgsVectorLayer(self._source_path, "upload_src", "ogr")
-            if not src_layer.isValid():
+            from osgeo import ogr, gdal
+            gdal.UseExceptions()
+
+            src_ds = ogr.Open(self._source_path, 0)
+            if src_ds is None:
                 self._exception = Exception(f"GPKG invalido: {self._source_path}")
+                return False
+
+            src_lyr = src_ds.GetLayer(0)
+            if src_lyr is None:
+                src_ds = None
+                self._exception = Exception(f"GPKG sem layers: {self._source_path}")
                 return False
 
             temp_dir = tempfile.mkdtemp(prefix="satirriga_upload_")
@@ -61,44 +70,57 @@ class UploadZonalTask(SatIrrigaTask):
             # Preserva _original_fid e _sync_status (servidor usa para classificar)
             internal_fields = {"_edit_token", "_sync_timestamp", "_zonal_id",
                                "_mapeamento_id", "_metodo_id"}
-            clean_fields = QgsFields()
-            field_mapping = []
-            for field in src_layer.fields():
-                if field.name() not in internal_fields:
-                    clean_fields.append(field)
-                    field_mapping.append(src_layer.fields().indexOf(field.name()))
 
-            crs = src_layer.crs()
-            if not crs.isValid():
-                crs = QgsCoordinateReferenceSystem("EPSG:4326")
+            src_defn = src_lyr.GetLayerDefn()
+            field_mapping = []  # (src_idx, field_defn) para campos a copiar
+            for i in range(src_defn.GetFieldCount()):
+                fd = src_defn.GetFieldDefn(i)
+                if fd.GetName() not in internal_fields:
+                    field_mapping.append((i, fd))
 
-            options = QgsVectorFileWriter.SaveVectorOptions()
-            options.driverName = "GPKG"
-            options.fileEncoding = "utf-8"
-            writer = QgsVectorFileWriter.create(
-                temp_gpkg, clean_fields, src_layer.wkbType(),
-                crs, QgsCoordinateTransformContext(), options,
-            )
+            src_srs = src_lyr.GetSpatialRef()
+            if src_srs is None:
+                from osgeo import osr
+                src_srs = osr.SpatialReference()
+                src_srs.ImportFromEPSG(4326)
 
-            if writer is None or writer.hasError() != QgsVectorFileWriter.NoError:
-                err_msg = writer.errorMessage() if writer else "writer nulo"
-                self._exception = Exception(f"Erro ao criar GPKG temp: {err_msg}")
+            gpkg_drv = ogr.GetDriverByName("GPKG")
+            dst_ds = gpkg_drv.CreateDataSource(temp_gpkg)
+            if dst_ds is None:
+                src_ds = None
+                self._exception = Exception(f"Erro ao criar GPKG temp: {temp_gpkg}")
                 return False
 
-            total_features = src_layer.featureCount()
-            for i, feat in enumerate(src_layer.getFeatures()):
+            dst_lyr = dst_ds.CreateLayer(
+                "upload", srs=src_srs, geom_type=src_lyr.GetGeomType(),
+                options=["FID=fid"],
+            )
+            for _, fd in field_mapping:
+                dst_lyr.CreateField(fd)
+
+            dst_defn = dst_lyr.GetLayerDefn()
+            total_features = src_lyr.GetFeatureCount()
+            dst_lyr.StartTransaction()
+
+            for i, src_feat in enumerate(src_lyr):
                 if self.isCanceled():
-                    del writer
+                    dst_lyr.RollbackTransaction()
+                    src_ds = None
+                    dst_ds = None
                     return False
-                clean_feat = QgsFeature(clean_fields)
-                clean_feat.setGeometry(feat.geometry())
-                for new_idx, old_idx in enumerate(field_mapping):
-                    clean_feat.setAttribute(new_idx, feat.attribute(old_idx))
-                writer.addFeature(clean_feat)
+                dst_feat = ogr.Feature(dst_defn)
+                geom = src_feat.GetGeometryRef()
+                if geom is not None:
+                    dst_feat.SetGeometry(geom.Clone())
+                for new_idx, (old_idx, _) in enumerate(field_mapping):
+                    dst_feat.SetField(new_idx, src_feat.GetField(old_idx))
+                dst_lyr.CreateFeature(dst_feat)
                 if total_features > 0:
                     self.setProgress(int((i + 1) * 25 / total_features))
 
-            del writer
+            dst_lyr.CommitTransaction()
+            src_ds = None
+            dst_ds = None
             self.setProgress(25)
 
             if self.isCanceled():

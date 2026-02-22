@@ -1,4 +1,8 @@
-"""Task para download de zonal (checkout + FlatGeobuf -> GPKG)."""
+"""Task para download de zonal (checkout + FlatGeobuf -> GPKG).
+
+Usa osgeo.ogr/gdal para conversao FGB->GPKG em worker thread,
+evitando criar QgsVectorLayer fora da main thread.
+"""
 
 import os
 import tempfile
@@ -6,11 +10,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from qgis.core import (
-    QgsVectorLayer, QgsVectorFileWriter, QgsCoordinateReferenceSystem,
-    QgsCoordinateTransformContext, QgsField, QgsFields, QgsFeature, Qgis,
-)
-from qgis.PyQt.QtCore import QVariant
+from qgis.core import Qgis
 
 from .base_task import SatIrrigaTask
 from ...domain.models.enums import SyncStatusEnum
@@ -30,30 +30,41 @@ class DownloadZonalTask(SatIrrigaTask):
         self._zonal_id = zonal_id
 
     def _validate_existing_gpkg(self, gpkg_path, expected_count):
-        """Verifica se GPKG existente tem features e geometrias validas."""
+        """Verifica se GPKG existente tem features e geometrias validas.
+
+        Usa osgeo.ogr para evitar criar QgsVectorLayer em worker thread.
+        """
         if not os.path.exists(gpkg_path):
             self._log("[Download] GPKG nao encontrado para validacao de cache")
             return False
         try:
-            layer = QgsVectorLayer(gpkg_path, "cache_check", "ogr")
-            if not layer.isValid():
-                self._log("[Download] GPKG em cache invalido como layer")
+            from osgeo import ogr
+            ds = ogr.Open(gpkg_path, 0)  # read-only
+            if ds is None:
+                self._log("[Download] GPKG em cache invalido (ogr.Open falhou)")
                 return False
-            actual = layer.featureCount()
+            lyr = ds.GetLayer(0)
+            if lyr is None:
+                ds = None
+                self._log("[Download] GPKG em cache sem layer")
+                return False
+            actual = lyr.GetFeatureCount()
             if actual == 0 and expected_count > 0:
+                ds = None
                 self._log(
                     f"[Download] GPKG em cache vazio "
                     f"(0/{expected_count} features)"
                 )
                 return False
             # Verifica se a primeira feature tem geometria
-            for feat in layer.getFeatures():
-                if feat.geometry().isNull():
-                    self._log(
-                        "[Download] GPKG em cache tem features sem geometria"
-                    )
-                    return False
-                break
+            feat = lyr.GetNextFeature()
+            if feat is not None and feat.GetGeometryRef() is None:
+                ds = None
+                self._log(
+                    "[Download] GPKG em cache tem features sem geometria"
+                )
+                return False
+            ds = None  # fecha dataset
             self._log(
                 f"[Download] GPKG em cache valido ({actual} features)"
             )
@@ -194,110 +205,140 @@ class DownloadZonalTask(SatIrrigaTask):
                 return False
 
             # ----------------------------------------------------------
-            # 3. Conversao FGB -> GPKG (55-90%)
+            # 3. Conversao FGB -> GPKG (55-90%) via GDAL/OGR
             # ----------------------------------------------------------
             self.signals.status_message.emit("Convertendo para GeoPackage...")
 
-            src_layer = QgsVectorLayer(temp_fgb, "fgb_src", "ogr")
-            if not src_layer.isValid():
+            from osgeo import ogr, osr, gdal
+            gdal.UseExceptions()
+
+            src_ds = ogr.Open(temp_fgb, 0)
+            if src_ds is None:
                 self._exception = Exception(
                     f"Falha ao abrir FlatGeobuf: {temp_fgb}"
                 )
                 return False
 
-            os.makedirs(os.path.dirname(self._gpkg_path), exist_ok=True)
-
-            # Build fields: originais + sync V2
-            fields = QgsFields()
-            for field in src_layer.fields():
-                fields.append(field)
-
-            sync_type_map = {
-                "INTEGER": QVariant.Int,
-                "TEXT": QVariant.String,
-            }
-            for fname, ftype in SYNC_FIELDS_V2:
-                fields.append(QgsField(fname, sync_type_map.get(ftype, QVariant.String)))
-
-            crs = src_layer.crs()
-            if not crs.isValid():
-                crs = QgsCoordinateReferenceSystem("EPSG:4326")
-
-            options = QgsVectorFileWriter.SaveVectorOptions()
-            options.driverName = "GPKG"
-            options.fileEncoding = "utf-8"
-            writer = QgsVectorFileWriter.create(
-                self._gpkg_path, fields, src_layer.wkbType(),
-                crs, QgsCoordinateTransformContext(), options,
-            )
-
-            if writer is None or writer.hasError() != QgsVectorFileWriter.NoError:
-                err_msg = writer.errorMessage() if writer else "writer nulo"
-                self._exception = Exception(f"Erro ao criar GPKG: {err_msg}")
+            src_lyr = src_ds.GetLayer(0)
+            if src_lyr is None:
+                src_ds = None
+                self._exception = Exception(
+                    f"FlatGeobuf sem layers: {temp_fgb}"
+                )
                 return False
 
-            total_features = src_layer.featureCount()
+            os.makedirs(os.path.dirname(self._gpkg_path), exist_ok=True)
+
+            # Cria GPKG destino
+            gpkg_drv = ogr.GetDriverByName("GPKG")
+            if os.path.exists(self._gpkg_path):
+                gpkg_drv.DeleteDataSource(self._gpkg_path)
+            dst_ds = gpkg_drv.CreateDataSource(self._gpkg_path)
+            if dst_ds is None:
+                src_ds = None
+                self._exception = Exception(
+                    f"Erro ao criar GPKG: {self._gpkg_path}"
+                )
+                return False
+
+            # CRS
+            src_srs = src_lyr.GetSpatialRef()
+            if src_srs is None:
+                src_srs = osr.SpatialReference()
+                src_srs.ImportFromEPSG(4326)
+
+            src_defn = src_lyr.GetLayerDefn()
+            geom_type = src_lyr.GetGeomType()
+            dst_lyr = dst_ds.CreateLayer(
+                "zonal", srs=src_srs, geom_type=geom_type,
+                options=["FID=fid"],
+            )
+            if dst_lyr is None:
+                src_ds = None
+                dst_ds = None
+                self._exception = Exception("Erro ao criar layer no GPKG")
+                return False
+
+            # Copia campos originais
+            src_field_count = src_defn.GetFieldCount()
+            for i in range(src_field_count):
+                field_defn = src_defn.GetFieldDefn(i)
+                dst_lyr.CreateField(field_defn)
+
+            # Campos de sync V2
+            ogr_type_map = {"INTEGER": ogr.OFTInteger, "TEXT": ogr.OFTString}
+            for fname, ftype in SYNC_FIELDS_V2:
+                fd = ogr.FieldDefn(fname, ogr_type_map.get(ftype, ogr.OFTString))
+                dst_lyr.CreateField(fd)
+
+            # Indice do campo 'id' na fonte
+            id_field_idx = src_defn.GetFieldIndex("id")
+
+            total_features = src_lyr.GetFeatureCount()
             self._log(
                 f"[Download] FGB: {total_features} features, "
-                f"{src_layer.fields().count()} campos, "
-                f"CRS={src_layer.crs().authid()}"
+                f"{src_field_count} campos, "
+                f"CRS={src_srs.GetAuthorityCode(None) or '?'}"
             )
-            now_iso = datetime.now(timezone.utc).isoformat()
-            src_field_count = src_layer.fields().count()
 
-            # Indice do campo 'id' na fonte (ZonalGeometria.id do servidor)
-            id_field_idx = src_layer.fields().indexOf("id")
+            now_iso = datetime.now(timezone.utc).isoformat()
+            dst_defn = dst_lyr.GetLayerDefn()
 
             written_count = 0
             write_errors = 0
-            for i, src_feat in enumerate(src_layer.getFeatures()):
+            dst_lyr.StartTransaction()
+
+            for i, src_feat in enumerate(src_lyr):
                 if self.isCanceled():
-                    del writer
+                    dst_lyr.RollbackTransaction()
+                    src_ds = None
+                    dst_ds = None
                     return False
 
-                feat = QgsFeature(fields)
-                geom = src_feat.geometry()
-                feat.setGeometry(geom)
+                dst_feat = ogr.Feature(dst_defn)
+                geom = src_feat.GetGeometryRef()
+                if geom is not None:
+                    dst_feat.SetGeometry(geom.Clone())
 
-                # Copiar todos os atributos originais
+                # Copiar atributos originais
                 for j in range(src_field_count):
-                    feat.setAttribute(j, src_feat.attribute(j))
+                    dst_feat.SetField(j, src_feat.GetField(j))
 
                 # Campos de sync V2
-                base_idx = src_field_count
-                original_fid = src_feat.attribute(id_field_idx) if id_field_idx >= 0 else src_feat.id()
-                feat.setAttribute(base_idx + 0, original_fid)            # _original_fid
-                feat.setAttribute(base_idx + 1, SyncStatusEnum.DOWNLOADED.value)
-                feat.setAttribute(base_idx + 2, now_iso)                  # _sync_timestamp
-                feat.setAttribute(base_idx + 3, self._zonal_id)           # _zonal_id
-                feat.setAttribute(base_idx + 4, edit_token)               # _edit_token
+                original_fid = src_feat.GetField(id_field_idx) if id_field_idx >= 0 else src_feat.GetFID()
+                dst_feat.SetField("_original_fid", original_fid)
+                dst_feat.SetField("_sync_status", SyncStatusEnum.DOWNLOADED.value)
+                dst_feat.SetField("_sync_timestamp", now_iso)
+                dst_feat.SetField("_zonal_id", self._zonal_id)
+                dst_feat.SetField("_edit_token", edit_token)
 
-                ok = writer.addFeature(feat)
-                if ok:
+                err = dst_lyr.CreateFeature(dst_feat)
+                if err == ogr.OGRERR_NONE:
                     written_count += 1
                 else:
                     write_errors += 1
                     if write_errors <= 3:
                         self._log(
-                            f"[Download] addFeature falhou para "
-                            f"feature {i} (id={original_fid}): "
-                            f"{writer.errorMessage()}"
+                            f"[Download] CreateFeature falhou para "
+                            f"feature {i} (id={original_fid})"
                         )
 
                 # Log diagnostico da primeira feature
                 if i == 0:
                     self._log(
                         f"[Download] Primeira feature: "
-                        f"geom_null={geom.isNull()}, "
-                        f"geom_type={geom.type()}, "
-                        f"wkb_type={geom.wkbType()}, "
-                        f"attrs={feat.attributeCount()}"
+                        f"geom_null={geom is None}, "
+                        f"geom_type={geom.GetGeometryType() if geom else 'N/A'}, "
+                        f"attrs={dst_feat.GetFieldCount()}"
                     )
 
                 if total_features > 0:
                     self.setProgress(55 + int((i + 1) * 35 / total_features))
 
-            del writer  # Flush e fecha GPKG
+            dst_lyr.CommitTransaction()
+            # Flush e fecha GPKG e FGB
+            src_ds = None
+            dst_ds = None
             self.setProgress(90)
 
             self._log(
