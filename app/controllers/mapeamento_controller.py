@@ -264,6 +264,7 @@ class MapeamentoController(QObject):
 
         if attr_changes:
             layer.dataProvider().changeAttributeValues(attr_changes)
+            layer.dataProvider().forceReload()
 
     # ----------------------------------------------------------------
     # Edit tracking
@@ -277,7 +278,7 @@ class MapeamentoController(QObject):
         e afterCommitChanges para persistir o _sync_status no GPKG.
         """
         layer_id = layer.id()
-        self._pending_edit_fids[layer_id] = {"changed": set(), "added": set()}
+        self._pending_edit_fids[layer_id] = {"changed": set()}
 
         layer.beforeCommitChanges.connect(
             lambda: self._capture_edited_fids(layer)
@@ -287,86 +288,121 @@ class MapeamentoController(QObject):
         )
 
     def _capture_edited_fids(self, layer):
-        """Captura IDs das features alteradas e adicionadas antes do commit."""
+        """Captura IDs das features alteradas antes do commit.
+
+        Apenas features existentes (FID > 0) sao capturadas aqui.
+        Features novas sao detectadas em _mark_edited_features via
+        _sync_status NULL, pois os FIDs temporarios negativos do
+        editBuffer nao existem apos o commit.
+        """
         layer_id = layer.id()
         changed_fids = set()
-        added_fids = set()
 
-        buf = layer.editBuffer()
-        if buf:
-            changed_fids.update(buf.changedGeometries().keys())
-            changed_fids.update(buf.changedAttributeValues().keys())
-            added_fids.update(buf.addedFeatures().keys())
+        try:
+            buf = layer.editBuffer()
+            if buf:
+                changed_fids.update(buf.changedGeometries().keys())
+                changed_fids.update(buf.changedAttributeValues().keys())
 
-        self._pending_edit_fids[layer_id] = {
-            "changed": changed_fids,
-            "added": added_fids,
-        }
+                QgsMessageLog.logMessage(
+                    f"[EditTrack] beforeCommit: {len(buf.changedGeometries())} geom, "
+                    f"{len(buf.changedAttributeValues())} attr, "
+                    f"{len(buf.addedFeatures())} added",
+                    PLUGIN_NAME, Qgis.Info,
+                )
+            else:
+                QgsMessageLog.logMessage(
+                    "[EditTrack] beforeCommit: editBuffer is None",
+                    PLUGIN_NAME, Qgis.Warning,
+                )
+        except Exception as e:
+            QgsMessageLog.logMessage(
+                f"[EditTrack] erro em _capture_edited_fids: {e}",
+                PLUGIN_NAME, Qgis.Warning,
+            )
+
+        self._pending_edit_fids[layer_id] = {"changed": changed_fids}
 
     def _mark_edited_features(self, layer):
         """Marca features editadas como MODIFIED e novas como NEW no GPKG.
 
         Usa dataProvider().changeAttributeValues() para batch direto no GPKG,
         sem startEditing/commitChanges (evita loop de signals e e O(1) no provider).
+
+        Features novas sao detectadas por _sync_status NULL (os FIDs
+        temporarios negativos do editBuffer nao persistem apos commit).
         """
         from ...domain.models.enums import SyncStatusEnum
         from datetime import datetime, timezone
 
         layer_id = layer.id()
         fid_data = self._pending_edit_fids.pop(layer_id, None)
-        if not fid_data:
-            return
-        changed_fids = fid_data.get("changed", set())
-        added_fids = fid_data.get("added", set())
-
-        if not changed_fids and not added_fids:
-            return
+        changed_fids = fid_data.get("changed", set()) if fid_data else set()
 
         sync_idx = layer.fields().indexOf("_sync_status")
         ts_idx = layer.fields().indexOf("_sync_timestamp")
         if sync_idx < 0:
+            QgsMessageLog.logMessage(
+                "[EditTrack] campo _sync_status nao encontrado na layer",
+                PLUGIN_NAME, Qgis.Warning,
+            )
             return
 
         now_iso = datetime.now(timezone.utc).isoformat()
+        trackable = (
+            SyncStatusEnum.DOWNLOADED.value,
+            SyncStatusEnum.MODIFIED.value,
+            SyncStatusEnum.UPLOADED.value,
+        )
 
         # Batch: {fid: {field_idx: new_value, ...}, ...}
         attr_changes = {}
         modified_count = 0
         new_count = 0
 
+        # 1) Features existentes editadas (FIDs capturados no beforeCommit)
         for fid in changed_fids:
-            if fid in added_fids:
-                continue
             feat = layer.getFeature(fid)
             if not feat.isValid():
                 continue
             current_status = feat.attribute(sync_idx)
-            if current_status in (SyncStatusEnum.DOWNLOADED.value,
-                                  SyncStatusEnum.MODIFIED.value):
+            if current_status in trackable:
                 changes = {sync_idx: SyncStatusEnum.MODIFIED.value}
                 if ts_idx >= 0:
                     changes[ts_idx] = now_iso
                 attr_changes[fid] = changes
                 modified_count += 1
 
-        for fid in added_fids:
-            feat = layer.getFeature(fid)
-            if not feat.isValid():
+        # 2) Features novas: _sync_status NULL apos commit
+        for feat in layer.getFeatures():
+            fid = feat.id()
+            if fid in attr_changes:
                 continue
-            changes = {sync_idx: SyncStatusEnum.NEW.value}
-            if ts_idx >= 0:
-                changes[ts_idx] = now_iso
-            attr_changes[fid] = changes
-            new_count += 1
+            status = feat.attribute(sync_idx)
+            if status is None or (isinstance(status, str) and status == ""):
+                changes = {sync_idx: SyncStatusEnum.NEW.value}
+                if ts_idx >= 0:
+                    changes[ts_idx] = now_iso
+                attr_changes[fid] = changes
+                new_count += 1
 
         if attr_changes:
-            layer.dataProvider().changeAttributeValues(attr_changes)
+            ok = layer.dataProvider().changeAttributeValues(attr_changes)
+            # Invalida cache da layer para refletir mudancas na tabela de atributos
+            layer.dataProvider().forceReload()
             layer.triggerRepaint()
 
-        self._pending_edit_fids[layer_id] = {"changed": set(), "added": set()}
+            QgsMessageLog.logMessage(
+                f"[EditTrack] {modified_count} MODIFIED, {new_count} NEW "
+                f"(provider write ok={ok})",
+                PLUGIN_NAME, Qgis.Info,
+            )
+        else:
+            QgsMessageLog.logMessage(
+                "[EditTrack] nenhuma feature para marcar "
+                f"(changed_fids={len(changed_fids)})",
+                PLUGIN_NAME, Qgis.Info,
+            )
 
-        QgsMessageLog.logMessage(
-            f"Edit tracking: {modified_count} MODIFIED, {new_count} NEW",
-            PLUGIN_NAME, Qgis.Info,
-        )
+        self._pending_edit_fids[layer_id] = {"changed": set()}
         self.edit_tracking_done.emit()

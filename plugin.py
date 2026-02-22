@@ -1,4 +1,5 @@
 import os
+import traceback
 
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtGui import QIcon
@@ -7,21 +8,6 @@ from qgis.core import QgsMessageLog, Qgis
 
 from . import resources  # noqa: F401 — registra icone no Qt Resource System
 from .infra.config.settings import PLUGIN_NAME
-from .infra.config.repository import ConfigRepository
-from .infra.http.auth_interceptor import AuthInterceptor
-from .infra.http.client import HttpClient
-from .app.state.store import AppState
-from .app.controllers.auth_controller import AuthController
-from .ui.dock import SatIrrigaDock
-from .app.controllers.mapeamento_controller import MapeamentoController
-from .ui.widgets.session_header import SessionHeader
-from .ui.widgets.mapeamentos_tab import MapeamentosTab
-from .ui.widgets.camadas_tab import CamadasTab
-from .ui.widgets.config_tab import ConfigTab
-from .ui.widgets.logs_tab import LogsTab
-from .ui.widgets.home_tab import HomeTab
-from .app.controllers.config_controller import ConfigController
-from .app.controllers.attribute_controller import AttributeEditController
 
 
 class SatIrrigaPlugin:
@@ -41,20 +27,40 @@ class SatIrrigaPlugin:
             self.translator.load(locale_path)
             QCoreApplication.installTranslator(self.translator)
 
-        # Instance state
+        # Instance state — declaracao somente, init em _ensure_initialized
         self.actions = []
         self.menu = self.tr("&SatIrriga")
-        self.toolbar = self.iface.addToolBar("SatIrriga")
-        self.toolbar.setObjectName("SatIrrigaToolbar")
+        self.toolbar = None
         self.plugin_is_active = False
         self.dock = None
         self._attribute_controller = None
 
-        # DI: shared objects
+        # Lazy-initialized em _ensure_initialized()
+        self._config_repo = None
+        self._state = None
+        self._auth_controller = None
+        self._auth_interceptor = None
+        self._http_client = None
+        self._mapeamento_controller = None
+        self._config_controller = None
+        self._initialized = False
+
+    def _ensure_initialized(self):
+        """Inicializa controladores e servicos sob demanda."""
+        if self._initialized:
+            return
+
+        from .infra.config.repository import ConfigRepository
+        from .infra.http.auth_interceptor import AuthInterceptor
+        from .infra.http.client import HttpClient
+        from .app.state.store import AppState
+        from .app.controllers.auth_controller import AuthController
+        from .app.controllers.mapeamento_controller import MapeamentoController
+        from .app.controllers.config_controller import ConfigController
+
         self._config_repo = ConfigRepository()
         self._state = AppState()
 
-        # Auth
         self._auth_controller = AuthController(self._state, self._config_repo)
         self._auth_interceptor = AuthInterceptor(
             token_provider=self._auth_controller.get_access_token,
@@ -63,7 +69,6 @@ class SatIrrigaPlugin:
             auth_interceptor=self._auth_interceptor,
         )
 
-        # Mapeamento controller
         self._mapeamento_controller = MapeamentoController(
             state=self._state,
             http_client=self._http_client,
@@ -71,10 +76,11 @@ class SatIrrigaPlugin:
             token_provider=self._auth_controller.get_access_token,
         )
 
-        # Config controller
         self._config_controller = ConfigController(
             config_repo=self._config_repo,
         )
+
+        self._initialized = True
 
     def tr(self, message):
         return QCoreApplication.translate("SatIrrigaPlugin", message)
@@ -107,6 +113,9 @@ class SatIrrigaPlugin:
     # ------------------------------------------------------------------
 
     def initGui(self):
+        self.toolbar = self.iface.addToolBar("SatIrriga")
+        self.toolbar.setObjectName("SatIrrigaToolbar")
+
         icon_path = ":/plugins/satirriga_qgis/icon.png"
         self.add_action(
             icon_path,
@@ -115,15 +124,24 @@ class SatIrrigaPlugin:
             parent=self.iface.mainWindow(),
         )
 
-        # Configura hosts autorizados para bearer token
-        from urllib.parse import urlparse
-        api_host = urlparse(self._config_repo.get("api_base_url")).hostname
-        sso_host = urlparse(self._config_repo.get("sso_base_url")).hostname
-        hosts = [h for h in (api_host, sso_host) if h]
-        self._auth_interceptor.update_allowed_hosts(hosts)
+        # Inicializa servicos e agenda restauracao de sessao
+        try:
+            self._ensure_initialized()
 
-        # Adia restauracao de sessao para apos o QGIS finalizar o startup
-        QTimer.singleShot(500, self._auth_controller.try_restore_session)
+            from urllib.parse import urlparse
+            api_host = urlparse(self._config_repo.get("api_base_url")).hostname
+            sso_host = urlparse(self._config_repo.get("sso_base_url")).hostname
+            hosts = [h for h in (api_host, sso_host) if h]
+            self._auth_interceptor.update_allowed_hosts(hosts)
+
+            # Adia restauracao de sessao para apos o QGIS finalizar o startup
+            QTimer.singleShot(500, self._auth_controller.try_restore_session)
+        except Exception as e:
+            self._log(
+                f"Erro na inicializacao dos servicos: {e}\n"
+                f"{traceback.format_exc()}",
+                Qgis.Critical,
+            )
 
         self._log("Plugin v2 carregado")
 
@@ -138,16 +156,24 @@ class SatIrrigaPlugin:
             self.dock = None
 
         if self.toolbar:
-            del self.toolbar
+            self.toolbar.deleteLater()
+            self.toolbar = None
 
         # Cleanup controllers
         if self._attribute_controller:
-            self._attribute_controller.cleanup()
+            try:
+                self._attribute_controller.cleanup()
+            except (RuntimeError, TypeError):
+                pass
             self._attribute_controller = None
 
         if self._auth_controller:
-            self._auth_controller.cleanup()
+            try:
+                self._auth_controller.cleanup()
+            except (RuntimeError, TypeError):
+                pass
 
+        self._initialized = False
         self._log("Plugin v2 descarregado")
 
     def run(self):
@@ -155,14 +181,26 @@ class SatIrrigaPlugin:
             self.plugin_is_active = True
 
             if self.dock is None:
-                self.dock = SatIrrigaDock(
-                    state=self._state,
-                    config_repo=self._config_repo,
-                    parent=self.iface.mainWindow(),
-                )
-                self.dock.closed.connect(self._on_dock_closed)
+                try:
+                    self._ensure_initialized()
 
-                self._wire_controllers()
+                    from .ui.dock import SatIrrigaDock
+                    self.dock = SatIrrigaDock(
+                        state=self._state,
+                        config_repo=self._config_repo,
+                        parent=self.iface.mainWindow(),
+                    )
+                    self.dock.closed.connect(self._on_dock_closed)
+
+                    self._wire_controllers()
+                except Exception as e:
+                    self._log(
+                        f"Erro ao criar dock: {e}\n"
+                        f"{traceback.format_exc()}",
+                        Qgis.Critical,
+                    )
+                    self.plugin_is_active = False
+                    return
 
             self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dock)
             self.dock.show()
@@ -177,6 +215,15 @@ class SatIrrigaPlugin:
 
     def _wire_controllers(self):
         """Conecta controllers aos widgets do dock."""
+        from .ui.dock import SatIrrigaDock
+        from .ui.widgets.session_header import SessionHeader
+        from .ui.widgets.mapeamentos_tab import MapeamentosTab
+        from .ui.widgets.camadas_tab import CamadasTab
+        from .ui.widgets.config_tab import ConfigTab
+        from .ui.widgets.logs_tab import LogsTab
+        from .ui.widgets.home_tab import HomeTab
+        from .app.controllers.attribute_controller import AttributeEditController
+
         # Erros globais -> dialog
         self._state.error_occurred.connect(self._on_error_occurred)
 
@@ -240,6 +287,10 @@ class SatIrrigaPlugin:
         self._attribute_controller = AttributeEditController(
             canvas=self.iface.mapCanvas(),
             parent=self.dock,
+        )
+        # Dialog save -> atualiza camadas_tab (via edit_tracking_done)
+        self._attribute_controller.feature_saved.connect(
+            lambda _fid: self._mapeamento_controller.edit_tracking_done.emit()
         )
 
         # Garante que Home e a pagina inicial apos o wiring

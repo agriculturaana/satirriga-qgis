@@ -427,7 +427,9 @@ class AttributeEditDialog(QDialog):
 
         if sync_idx >= 0:
             current = self._feature.attribute(sync_idx)
-            if current in (SyncStatusEnum.DOWNLOADED.value, SyncStatusEnum.MODIFIED.value):
+            if current in (SyncStatusEnum.DOWNLOADED.value,
+                           SyncStatusEnum.MODIFIED.value,
+                           SyncStatusEnum.UPLOADED.value):
                 attr_changes[sync_idx] = SyncStatusEnum.MODIFIED.value
 
         if ts_idx >= 0:
@@ -437,6 +439,8 @@ class AttributeEditDialog(QDialog):
             self._layer.dataProvider().changeAttributeValues(
                 {self._fid: attr_changes}
             )
+            # Invalida cache para refletir mudancas na tabela de atributos
+            self._layer.dataProvider().forceReload()
             self._layer.triggerRepaint()
             self.feature_saved.emit(self._fid)
 

@@ -4,7 +4,7 @@ Quando o layer ativo e SatIrriga (tem campo _sync_status) e exatamente
 1 feature e selecionada, abre o AttributeEditDialog.
 """
 
-from qgis.PyQt.QtCore import QObject
+from qgis.PyQt.QtCore import QObject, pyqtSignal
 from qgis.core import QgsVectorLayer, QgsMessageLog, Qgis
 
 from ...infra.config.settings import PLUGIN_NAME
@@ -12,6 +12,8 @@ from ...infra.config.settings import PLUGIN_NAME
 
 class AttributeEditController(QObject):
     """Escuta selecao no canvas e abre dialog de edicao de atributos."""
+
+    feature_saved = pyqtSignal(int)  # fid — propaga do dialog para o plugin
 
     def __init__(self, canvas, parent=None):
         super().__init__(parent)
@@ -63,10 +65,11 @@ class AttributeEditController(QObject):
 
     def _close_dialog(self):
         """Fecha dialog existente se houver."""
-        if self._dialog is not None:
-            self._dialog.close()
-            self._dialog.deleteLater()
-            self._dialog = None
+        dlg = self._dialog
+        self._dialog = None
+        if dlg is not None:
+            dlg.close()
+            dlg.deleteLater()
 
     def _on_selection_changed(self, selected, deselected, clear_and_select):
         """Handler para mudanca de selecao no layer ativo."""
@@ -106,15 +109,18 @@ class AttributeEditController(QObject):
         )
 
     def _on_feature_saved(self, fid):
-        """Handler apos salvar feature."""
+        """Handler apos salvar feature — propaga signal para o plugin."""
         QgsMessageLog.logMessage(
             f"Atributos da feature #{fid} salvos",
             PLUGIN_NAME, Qgis.Info,
         )
+        self.feature_saved.emit(fid)
 
     def _on_dialog_finished(self, result):
         """Handler quando dialog fecha (accept ou reject)."""
-        self._dialog = None
+        if self._dialog is not None:
+            self._dialog.deleteLater()
+            self._dialog = None
 
     @staticmethod
     def _is_satirriga_layer(layer):
