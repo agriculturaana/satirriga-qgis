@@ -30,3 +30,7 @@ class UserInfo:
             preferred_username=claims.get("preferred_username"),
             token_exp=claims.get("exp"),
         )
+
+    @property
+    def is_homologador(self) -> bool:
+        return "homologar" in self.roles

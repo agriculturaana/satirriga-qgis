@@ -46,26 +46,23 @@ class MapeamentosTab(QWidget):
 
         # Tabela de catalogo
         self._cat_table = QTableWidget()
-        self._cat_table.setColumnCount(5)
+        self._cat_table.setColumnCount(8)
         self._cat_table.setHorizontalHeaderLabels([
-            "Descrição", "Status", "Features", "Área (ha)", "Ação"
+            "#ID", "Data Ref.", "Descrição", "Método", "Autor",
+            "Status", "Features / Área", "Ação",
         ])
-        self._cat_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self._cat_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self._cat_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self._cat_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self._cat_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self._cat_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self._cat_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self._cat_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self._cat_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        self._cat_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeToContents)
         self._cat_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._cat_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self._cat_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._cat_table.verticalHeader().setVisible(False)
-
-        # Tooltips nos headers
-        header_view = self._cat_table.horizontalHeader()
-        header_view.model().setHeaderData(1, header_view.orientation(), "Status do processamento", 3)
-        header_view.model().setHeaderData(2, header_view.orientation(), "Número de feições", 3)
-        header_view.model().setHeaderData(3, header_view.orientation(), "Área total em hectares", 3)
-
         layout.addWidget(self._cat_table)
 
         # Status label
@@ -102,6 +99,7 @@ class MapeamentosTab(QWidget):
 
     def _on_catalogo_changed(self, items):
         """Atualiza tabela do catalogo zonal."""
+        self._cat_table.setSortingEnabled(False)
         self._cat_table.setRowCount(0)
 
         if not items:
@@ -113,12 +111,35 @@ class MapeamentosTab(QWidget):
         self._cat_table.setRowCount(len(items))
 
         for i, item in enumerate(items):
+            # #ID (mapeamento)
+            id_item = QTableWidgetItem()
+            id_item.setData(Qt.DisplayRole, item.mapeamento_id or 0)
+            self._cat_table.setItem(i, 0, id_item)
+
+            # Data Ref. (dd/mm/yyyy)
+            data_ref = "—"
+            if item.data_referencia:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(item.data_referencia.replace("Z", "+00:00"))
+                    data_ref = dt.strftime("%d/%m/%Y")
+                except (ValueError, AttributeError):
+                    data_ref = item.data_referencia[:10]
+            self._cat_table.setItem(i, 1, QTableWidgetItem(data_ref))
+
             # Descricao (renderiza HTML)
             desc_label = QLabel(item.descricao)
             desc_label.setTextFormat(Qt.RichText)
             desc_label.setWordWrap(True)
             desc_label.setStyleSheet("padding: 2px 4px;")
-            self._cat_table.setCellWidget(i, 0, desc_label)
+            self._cat_table.setCellWidget(i, 2, desc_label)
+
+            # Metodo
+            metodo_label = self._format_metodo(item.metodo_apply) if item.metodo_apply else "—"
+            self._cat_table.setItem(i, 3, QTableWidgetItem(metodo_label))
+
+            # Autor
+            self._cat_table.setItem(i, 4, QTableWidgetItem(item.author or "—"))
 
             # Status chip
             status_item = QTableWidgetItem(item.status)
@@ -128,17 +149,11 @@ class MapeamentosTab(QWidget):
                 status_item.setForeground(QColor(status_enum.color))
             except ValueError:
                 pass
-            self._cat_table.setItem(i, 1, status_item)
+            self._cat_table.setItem(i, 5, status_item)
 
-            # Features count
-            self._cat_table.setItem(
-                i, 2, QTableWidgetItem(str(item.result_count))
-            )
-
-            # Area
-            self._cat_table.setItem(
-                i, 3, QTableWidgetItem(f"{item.total_area_ha:,.1f}")
-            )
+            # Features / Area
+            feat_area = f"{item.result_count or 0} / {(item.total_area_ha or 0):,.1f} ha"
+            self._cat_table.setItem(i, 6, QTableWidgetItem(feat_area))
 
             # Botao download
             btn = QPushButton("Baixar")
@@ -151,15 +166,26 @@ class MapeamentosTab(QWidget):
             )
             zonal_id = item.id
             btn.clicked.connect(
-                lambda checked, zid=zonal_id: self._on_zonal_download_clicked(zid)
+                lambda checked, zid=zonal_id, ci=item: self._on_zonal_download_clicked(zid, ci)
             )
-            self._cat_table.setCellWidget(i, 4, btn)
+            self._cat_table.setCellWidget(i, 7, btn)
 
         self._cat_table.resizeRowsToContents()
 
-    def _on_zonal_download_clicked(self, zonal_id):
+    @staticmethod
+    def _format_metodo(metodo_apply):
+        """Converte metodoApply em label legivel."""
+        labels = {
+            "METODO_1": "Método 1",
+            "METODO_2_DISCRETO": "Método 2a (Discreto)",
+            "METODO_2_FUZZY": "Método 2b (Fuzzy)",
+            "METODO_3": "Método 3",
+        }
+        return labels.get(metodo_apply, metodo_apply)
+
+    def _on_zonal_download_clicked(self, zonal_id, catalogo_item=None):
         """Inicia download do resultado zonal."""
-        self._controller.download_zonal_result(zonal_id)
+        self._controller.download_zonal_result(zonal_id, catalogo_item=catalogo_item)
 
     # ----------------------------------------------------------------
     # Loading / Error
@@ -168,7 +194,7 @@ class MapeamentosTab(QWidget):
     def _on_loading_changed(self, operation, is_loading):
         if operation == "download":
             for row in range(self._cat_table.rowCount()):
-                widget = self._cat_table.cellWidget(row, 4)
+                widget = self._cat_table.cellWidget(row, 7)
                 if isinstance(widget, QPushButton):
                     widget.setEnabled(not is_loading)
                     widget.setText("Baixando..." if is_loading else "Baixar")

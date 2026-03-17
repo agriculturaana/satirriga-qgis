@@ -24,6 +24,7 @@ class HttpClient(QObject):
         self._nam = QgsNetworkAccessManager.instance()
         self._interceptor = auth_interceptor
         self._pending = {}  # request_id -> QNetworkReply
+        self._request_urls = {}  # request_id -> url (para logging)
 
     def _make_request(self, url: str, method: str = "GET",
                       data: bytes = None, content_type: str = None) -> str:
@@ -60,8 +61,6 @@ class HttpClient(QObject):
             return request_id
 
         self._pending[request_id] = reply
-        # Guarda URL para log na resposta
-        self._request_urls = getattr(self, "_request_urls", {})
         self._request_urls[request_id] = url
         reply.finished.connect(lambda: self._on_finished(request_id, reply))
 
@@ -70,7 +69,7 @@ class HttpClient(QObject):
     def _on_finished(self, request_id: str, reply):
         """Processa resposta do NAM."""
         self._pending.pop(request_id, None)
-        req_url = getattr(self, "_request_urls", {}).pop(request_id, "?")
+        req_url = self._request_urls.pop(request_id, "?")
 
         error = reply.error()
         status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
@@ -145,5 +144,6 @@ class HttpClient(QObject):
 
     def cancel(self, request_id: str):
         reply = self._pending.pop(request_id, None)
+        self._request_urls.pop(request_id, None)
         if reply:
             reply.abort()

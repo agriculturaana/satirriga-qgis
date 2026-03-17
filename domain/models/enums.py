@@ -57,6 +57,11 @@ class ZonalStatusEnum(str, Enum):
     CONSOLIDATING = "CONSOLIDATING"
     CONSOLIDATED = "CONSOLIDATED"
     CONSOLIDATION_FAILED = "CONSOLIDATION_FAILED"
+    INVALIDATED = "INVALIDATED"
+    AGUARDANDO = "AGUARDANDO"
+    HOMOLOGADO = "HOMOLOGADO"
+    REPROVADO = "REPROVADO"
+    CANCELADO = "CANCELADO"
 
     @property
     def label(self):
@@ -68,6 +73,11 @@ class ZonalStatusEnum(str, Enum):
             self.CONSOLIDATING: "Consolidando",
             self.CONSOLIDATED: "Consolidado",
             self.CONSOLIDATION_FAILED: "Falha na consolidação",
+            self.INVALIDATED: "Invalidado",
+            self.AGUARDANDO: "Aguardando",
+            self.HOMOLOGADO: "Homologado",
+            self.REPROVADO: "Reprovado",
+            self.CANCELADO: "Cancelado",
         }.get(self, self.value)
 
     @property
@@ -80,6 +90,11 @@ class ZonalStatusEnum(str, Enum):
             self.CONSOLIDATING: "#2196F3",
             self.CONSOLIDATED: "#1B5E20",
             self.CONSOLIDATION_FAILED: "#B71C1C",
+            self.INVALIDATED: "#795548",
+            self.AGUARDANDO: "#FFC107",
+            self.HOMOLOGADO: "#2E7D32",
+            self.REPROVADO: "#C62828",
+            self.CANCELADO: "#616161",
         }.get(self, "#9E9E9E")
 
 

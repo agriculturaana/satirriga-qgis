@@ -63,6 +63,11 @@ class CatalogoItem:
     result_count: int = 0
     total_area_ha: float = 0.0
     bbox: Optional[List[float]] = None
+    mapeamento_id: Optional[int] = None
+    data_referencia: Optional[str] = None
+    metodo_apply: Optional[str] = None
+    author: Optional[str] = None
+    job_id: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "CatalogoItem":
@@ -74,4 +79,9 @@ class CatalogoItem:
             result_count=data.get("resultCount", 0),
             total_area_ha=data.get("totalAreaHa", 0.0),
             bbox=data.get("bbox"),
+            mapeamento_id=data.get("mapeamentoId"),
+            data_referencia=data.get("dataReferencia"),
+            metodo_apply=data.get("metodoApply"),
+            author=data.get("author"),
+            job_id=data.get("jobId"),
         )

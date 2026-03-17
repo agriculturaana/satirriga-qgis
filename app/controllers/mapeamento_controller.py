@@ -18,6 +18,8 @@ class MapeamentoController(QObject):
     zonal_upload_completed = pyqtSignal(str, int)    # gpkg_path, zonal_id
     upload_progress = pyqtSignal(dict)               # UploadBatchStatus dict
     conflict_detected = pyqtSignal(str)              # batchUuid
+    conflict_data_ready = pyqtSignal(str, bytes)     # batchUuid, response body
+    conflict_resolved = pyqtSignal(str)              # batchUuid
     edit_tracking_done = pyqtSignal()                # apos marcar features editadas
 
     def __init__(self, state: AppState, http_client: HttpClient,
@@ -30,6 +32,14 @@ class MapeamentoController(QObject):
 
         # Tracking de requests pendentes
         self._pending_catalogo_id = None
+        self._pending_catalogo_homologacao_id = None
+        self._pending_parecer_id = None
+        self._pending_raster_id = None
+        self._pending_raster_meta = {}
+        self._pending_conflict_fetch_id = None
+        self._pending_conflict_fetch_uuid = None
+        self._pending_conflict_resolve_id = None
+        self._pending_conflict_resolve_uuid = None
         self._active_tasks = []
         self._pending_edit_fids = {}
 
@@ -63,6 +73,70 @@ class MapeamentoController(QObject):
     # Request handlers
     # ----------------------------------------------------------------
 
+    def load_catalogo_homologacao(self, status_filter="AGUARDANDO"):
+        """Carrega catalogo de zonais para homologacao."""
+        if not self._state.is_authenticated:
+            return
+
+        url = self._api_url(f"/zonal/catalogo?status={status_filter}")
+        self._state.set_loading("catalogo_homologacao", True)
+        self._pending_catalogo_homologacao_id = self._http.get(url)
+
+    def emitir_parecer(self, zonal_id, decisao, motivo=""):
+        """Emite parecer de homologacao (aprovar/reprovar/cancelar)."""
+        if not self._state.is_authenticated:
+            self._state.set_error("parecer", "Nao autenticado")
+            return
+
+        user = self._state.user
+        if not user or not user.is_homologador:
+            self._state.set_error("parecer", "Permissao negada: role 'homologar' requerida")
+            return
+
+        url = self._api_url("/consolidado/parecer")
+        payload = json.dumps({
+            "zonalId": zonal_id,
+            "decisao": decisao,
+            "motivo": motivo,
+        }).encode("utf-8")
+        self._state.set_loading("parecer", True)
+        self._pending_parecer_id = self._http.post_json(url, payload)
+
+    def encerrar_mapeamento(self, mapeamento_id):
+        """Encerra mapeamento (POST /api/mapeamento/:id/encerrar)."""
+        if not self._state.is_authenticated:
+            self._state.set_error("encerrar", "Nao autenticado")
+            return
+
+        url = self._api_url(f"/mapeamento/{mapeamento_id}/encerrar")
+        self._http.post_json(url, b"{}")
+
+    def load_raster_images(self, job_id, metodo_apply):
+        """Carrega URLs de tiles raster para um job."""
+        if not self._state.is_authenticated:
+            return
+
+        url = self._api_url(f"/mapeamento/tilesMetodos?jobId={job_id}")
+        self._pending_raster_meta = {"metodo_apply": metodo_apply}
+        self._pending_raster_id = self._http.get(url)
+
+    def fetch_conflicts(self, batch_uuid):
+        """Busca conflitos de um batch de upload via API assincrona."""
+        url = self._api_url(f"/zonal/upload/{batch_uuid}/conflicts")
+        self._pending_conflict_fetch_uuid = batch_uuid
+        self._pending_conflict_fetch_id = self._http.get(url)
+
+    def resolve_conflicts(self, batch_uuid, decisions):
+        """Envia resolucoes de conflitos para o servidor."""
+        url = self._api_url(f"/zonal/upload/{batch_uuid}/resolve")
+        payload = json.dumps({"decisions": decisions}).encode("utf-8")
+        self._pending_conflict_resolve_uuid = batch_uuid
+        self._pending_conflict_resolve_id = self._http.post_json(url, payload)
+
+    # ----------------------------------------------------------------
+    # Request handlers
+    # ----------------------------------------------------------------
+
     def _on_request_finished(self, request_id, status_code, body):
         if request_id == self._pending_catalogo_id:
             self._pending_catalogo_id = None
@@ -87,17 +161,109 @@ class MapeamentoController(QObject):
                 )
                 self._state.set_error("catalogo", f"Erro ao processar catalogo: {e}")
 
+        elif request_id == self._pending_catalogo_homologacao_id:
+            self._pending_catalogo_homologacao_id = None
+            self._state.set_loading("catalogo_homologacao", False)
+            try:
+                from ...domain.models.zonal import CatalogoItem
+                data = json.loads(body)
+                if isinstance(data, list):
+                    items_raw = data
+                else:
+                    items_raw = data.get("data") or data.get("content") or []
+                items = [CatalogoItem.from_dict(item) for item in items_raw]
+                self._state.catalogo_homologacao_changed.emit(items)
+                QgsMessageLog.logMessage(
+                    f"[Homologacao] {len(items)} zonais carregados",
+                    PLUGIN_NAME, Qgis.Info,
+                )
+            except Exception as e:
+                QgsMessageLog.logMessage(
+                    f"Erro ao parsear catalogo homologacao: {e}",
+                    PLUGIN_NAME, Qgis.Warning,
+                )
+                self._state.set_error("catalogo_homologacao", str(e))
+
+        elif request_id == self._pending_parecer_id:
+            self._pending_parecer_id = None
+            self._state.set_loading("parecer", False)
+            try:
+                data = json.loads(body)
+                self._state.parecer_emitido.emit(data)
+                QgsMessageLog.logMessage(
+                    f"[Parecer] Emitido: {data}",
+                    PLUGIN_NAME, Qgis.Info,
+                )
+            except Exception as e:
+                self._state.set_error("parecer", str(e))
+
+        elif request_id == self._pending_raster_id:
+            self._pending_raster_id = None
+            try:
+                from ...domain.services.raster_service import build_raster_configs
+                data = json.loads(body)
+                metodo = self._pending_raster_meta.get("metodo_apply", "")
+                configs = build_raster_configs(data, metodo)
+                self._state.raster_layers_ready.emit(configs)
+                QgsMessageLog.logMessage(
+                    f"[Raster] {len(configs)} camadas prontas",
+                    PLUGIN_NAME, Qgis.Info,
+                )
+            except Exception as e:
+                QgsMessageLog.logMessage(
+                    f"Erro ao parsear tiles raster: {e}",
+                    PLUGIN_NAME, Qgis.Warning,
+                )
+
+        elif request_id == self._pending_conflict_fetch_id:
+            self._pending_conflict_fetch_id = None
+            batch_uuid = self._pending_conflict_fetch_uuid
+            self._pending_conflict_fetch_uuid = None
+            self.conflict_data_ready.emit(batch_uuid, body)
+
+        elif request_id == self._pending_conflict_resolve_id:
+            self._pending_conflict_resolve_id = None
+            batch_uuid = self._pending_conflict_resolve_uuid
+            self._pending_conflict_resolve_uuid = None
+            QgsMessageLog.logMessage(
+                f"[Conflict] Resolucoes enviadas para batch {batch_uuid}",
+                PLUGIN_NAME, Qgis.Info,
+            )
+            self.conflict_resolved.emit(batch_uuid)
+
     def _on_request_error(self, request_id, error_msg):
         if request_id == self._pending_catalogo_id:
             self._pending_catalogo_id = None
             self._state.set_loading("catalogo", False)
             self._state.set_error("catalogo", error_msg)
+        elif request_id == self._pending_catalogo_homologacao_id:
+            self._pending_catalogo_homologacao_id = None
+            self._state.set_loading("catalogo_homologacao", False)
+            self._state.set_error("catalogo_homologacao", error_msg)
+        elif request_id == self._pending_parecer_id:
+            self._pending_parecer_id = None
+            self._state.set_loading("parecer", False)
+            self._state.set_error("parecer", error_msg)
+        elif request_id == self._pending_raster_id:
+            self._pending_raster_id = None
+            QgsMessageLog.logMessage(
+                f"Erro ao carregar tiles raster: {error_msg}",
+                PLUGIN_NAME, Qgis.Warning,
+            )
+        elif request_id == self._pending_conflict_fetch_id:
+            self._pending_conflict_fetch_id = None
+            self._pending_conflict_fetch_uuid = None
+            self._state.set_error("upload", f"Erro ao buscar conflitos: {error_msg}")
+        elif request_id == self._pending_conflict_resolve_id:
+            self._pending_conflict_resolve_id = None
+            self._pending_conflict_resolve_uuid = None
+            self._state.set_error("upload", f"Erro ao resolver conflitos: {error_msg}")
 
     # ----------------------------------------------------------------
     # Download Zonal (V2)
     # ----------------------------------------------------------------
 
-    def download_zonal_result(self, zonal_id):
+    def download_zonal_result(self, zonal_id, catalogo_item=None):
         """Inicia download do resultado zonal via checkout + FlatGeobuf."""
         from ...infra.tasks.download_task import DownloadZonalTask
         from ...domain.services.gpkg_service import gpkg_path_for_zonal, gpkg_base_dir
@@ -116,12 +282,23 @@ class MapeamentoController(QObject):
         base_dir = gpkg_base_dir(self._config.get("gpkg_base_dir"))
         output_path = gpkg_path_for_zonal(base_dir, zonal_id)
 
+        # Metadados do catalogo para enriquecer sidecar
+        catalogo_meta = {}
+        if catalogo_item:
+            catalogo_meta = {
+                "mapeamentoId": catalogo_item.mapeamento_id,
+                "dataReferencia": catalogo_item.data_referencia,
+                "descricao": catalogo_item.descricao,
+                "jobId": catalogo_item.job_id,
+            }
+
         task = DownloadZonalTask(
             checkout_url=checkout_url,
             download_url=download_url,
             access_token=token,
             gpkg_output_path=output_path,
             zonal_id=zonal_id,
+            catalogo_meta=catalogo_meta,
         )
 
         task.signals.completed.connect(
@@ -294,6 +471,10 @@ class MapeamentoController(QObject):
         Features novas sao detectadas em _mark_edited_features via
         _sync_status NULL, pois os FIDs temporarios negativos do
         editBuffer nao existem apos o commit.
+
+        Acumula FIDs em vez de sobrescrever, para evitar perda de dados
+        caso beforeCommitChanges dispare múltiplas vezes antes de
+        afterCommitChanges consumir os FIDs.
         """
         layer_id = layer.id()
         changed_fids = set()
@@ -321,7 +502,9 @@ class MapeamentoController(QObject):
                 PLUGIN_NAME, Qgis.Warning,
             )
 
-        self._pending_edit_fids[layer_id] = {"changed": changed_fids}
+        # Acumula em vez de sobrescrever (previne race condition)
+        existing = self._pending_edit_fids.get(layer_id, {}).get("changed", set())
+        self._pending_edit_fids[layer_id] = {"changed": existing | changed_fids}
 
     def _mark_edited_features(self, layer):
         """Marca features editadas como MODIFIED e novas como NEW no GPKG.

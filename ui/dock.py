@@ -23,8 +23,9 @@ class SatIrrigaDock(QDockWidget):
     PAGE_HOME = 0
     PAGE_MAPEAMENTOS = 1
     PAGE_CAMADAS = 2
-    PAGE_CONFIG = 3
-    PAGE_LOGS = 4
+    PAGE_HOMOLOGACAO = 3
+    PAGE_CONFIG = 4
+    PAGE_LOGS = 5
 
     def __init__(self, state, config_repo, parent=None):
         super().__init__(parent)
@@ -67,7 +68,7 @@ class SatIrrigaDock(QDockWidget):
 
         # Placeholders (serao substituidos via set_page_widget)
         for label_text in ("Home", "Catálogo Zonal (requer login)", "Camadas locais",
-                           "Configurações", "Logs"):
+                           "Homologação (requer permissão)", "Configurações", "Logs"):
             placeholder = QLabel(label_text)
             placeholder.setAlignment(Qt.AlignCenter)
             placeholder.setStyleSheet("font-size: 12px;")
@@ -108,7 +109,7 @@ class SatIrrigaDock(QDockWidget):
         header.addWidget(title)
 
         # Environment chip
-        env = self._config.get("environment")
+        env = self._config.get("environment") or "production"
         env_label = ENVIRONMENT_LABELS.get(env, env.upper()[:3])
         env_color = ENVIRONMENT_COLORS.get(env, "#9E9E9E")
         self._env_chip = QLabel(env_label)
@@ -133,6 +134,11 @@ class SatIrrigaDock(QDockWidget):
         self._activity_bar.add_button("nav_home", "Tela inicial", self.PAGE_HOME)
         self._activity_bar.add_button("nav_mapeamentos", "Catálogo de resultados zonais", self.PAGE_MAPEAMENTOS)
         self._activity_bar.add_button("nav_camadas", "Camadas locais com status de sincronização", self.PAGE_CAMADAS)
+        # Homologacao — oculto por padrao, visivel para homologadores
+        self._homologacao_btn = self._activity_bar.add_button(
+            "nav_homologacao", "Homologação de mapeamentos", self.PAGE_HOMOLOGACAO,
+        )
+        self._homologacao_btn.setVisible(False)
         self._activity_bar.add_stretch()
         self._activity_bar.add_button("nav_config", "Configurações do plugin", self.PAGE_CONFIG)
         self._activity_bar.add_button("nav_logs", "Logs de operações", self.PAGE_LOGS)
@@ -163,11 +169,15 @@ class SatIrrigaDock(QDockWidget):
         else:
             self._user_label.setText("Não autenticado")
 
+        # Exibe/oculta botao de homologacao conforme role
+        is_homologador = getattr(user, "is_homologador", False) if user else False
+        self._homologacao_btn.setVisible(is_homologador)
+
     def set_page_widget(self, page_index, widget):
         """Substitui placeholder de uma pagina por widget real."""
         old = self._pages.widget(page_index)
-        self._pages.removeWidget(old)
         if old:
+            self._pages.removeWidget(old)
             old.deleteLater()
         self._pages.insertWidget(page_index, widget)
 

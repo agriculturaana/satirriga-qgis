@@ -54,20 +54,23 @@ class CamadasTab(QWidget):
         header.addWidget(self._refresh_btn)
         layout.addLayout(header)
 
-        # Tabela — 4 colunas
+        # Tabela — 6 colunas
         self._table = QTableWidget()
-        self._table.setColumnCount(4)
+        self._table.setColumnCount(6)
         self._table.setHorizontalHeaderLabels([
-            "Zonal", "Status Sinc.", "Tamanho", "Ações"
+            "#ID", "Data Ref.", "Descrição", "Status Sinc.", "Tamanho", "Ações",
         ])
-        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SingleSelection)
         self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._table.verticalHeader().setVisible(False)
+        self._table.setSortingEnabled(True)
         layout.addWidget(self._table)
 
         # Upload progress widget (inicialmente hidden)
@@ -100,7 +103,7 @@ class CamadasTab(QWidget):
     def _on_loading_changed(self, operation, is_loading):
         if operation == "upload":
             for row in range(self._table.rowCount()):
-                widget = self._table.cellWidget(row, 3)
+                widget = self._table.cellWidget(row, 5)
                 if widget:
                     for btn in widget.findChildren(QPushButton):
                         btn.setEnabled(not is_loading)
@@ -165,21 +168,39 @@ class CamadasTab(QWidget):
         for i, gpkg_info in enumerate(self._gpkg_list):
             zid = gpkg_info.get("zonal_id", "?")
 
-            # Coluna 0: Zonal
-            self._table.setItem(i, 0, QTableWidgetItem(f"Zonal {zid}"))
+            # Coluna 0: #ID (mapeamento_id do sidecar)
+            mid = gpkg_info.get("mapeamento_id")
+            id_text = str(mid) if mid else "—"
+            self._table.setItem(i, 0, QTableWidgetItem(id_text))
 
-            # Coluna 1: Sync status
+            # Coluna 1: Data Ref.
+            data_ref = "—"
+            raw_date = gpkg_info.get("data_referencia")
+            if raw_date:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+                    data_ref = dt.strftime("%d/%m/%Y")
+                except (ValueError, AttributeError):
+                    data_ref = str(raw_date)[:10]
+            self._table.setItem(i, 1, QTableWidgetItem(data_ref))
+
+            # Coluna 2: Descricao
+            descricao = gpkg_info.get("descricao") or f"Zonal {zid}"
+            self._table.setItem(i, 2, QTableWidgetItem(descricao))
+
+            # Coluna 3: Sync status
             counts = gpkg_info.get("sync_counts", {})
             sync_item = self._build_sync_status_item(counts)
-            self._table.setItem(i, 1, sync_item)
+            self._table.setItem(i, 3, sync_item)
 
-            # Coluna 2: Tamanho
+            # Coluna 4: Tamanho
             size = gpkg_info.get("size_mb", 0)
-            self._table.setItem(i, 2, QTableWidgetItem(f"{size} MB"))
+            self._table.setItem(i, 4, QTableWidgetItem(f"{size} MB"))
 
-            # Coluna 3: Acoes
+            # Coluna 5: Acoes
             actions_widget = self._build_action_buttons(i, gpkg_info, counts)
-            self._table.setCellWidget(i, 3, actions_widget)
+            self._table.setCellWidget(i, 5, actions_widget)
 
         self._table.resizeRowsToContents()
 
@@ -287,9 +308,9 @@ class CamadasTab(QWidget):
         """Carrega GPKG como camada editavel no QGIS com edit tracking."""
         layer_name = f"Zonal {zonal_id}" if zonal_id else os.path.basename(gpkg_path)
 
-        # Verifica se ja esta carregada
+        # Verifica se ja esta carregada (source() pode conter |layername=...)
         for existing in QgsProject.instance().mapLayers().values():
-            if existing.source() == gpkg_path:
+            if existing.source().split("|")[0] == gpkg_path:
                 QgsMessageLog.logMessage(
                     f"Camada ja carregada: {gpkg_path}", PLUGIN_NAME, Qgis.Info,
                 )
@@ -337,7 +358,7 @@ class CamadasTab(QWidget):
         try:
             # Remove camada do projeto se carregada
             for layer_id, layer in QgsProject.instance().mapLayers().items():
-                if layer.source() == gpkg_path:
+                if layer.source().split("|")[0] == gpkg_path:
                     QgsProject.instance().removeMapLayer(layer_id)
 
             os.remove(gpkg_path)

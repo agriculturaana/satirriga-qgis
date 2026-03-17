@@ -21,13 +21,14 @@ class DownloadZonalTask(SatIrrigaTask):
     """Checkout + download FlatGeobuf + conversao para GPKG com campos V2."""
 
     def __init__(self, checkout_url, download_url, access_token,
-                 gpkg_output_path, zonal_id):
+                 gpkg_output_path, zonal_id, catalogo_meta=None):
         super().__init__(f"Download zonal {zonal_id}")
         self._checkout_url = checkout_url
         self._download_url = download_url
         self._token = access_token
         self._gpkg_path = gpkg_output_path
         self._zonal_id = zonal_id
+        self._catalogo_meta = catalogo_meta or {}
 
     def _validate_existing_gpkg(self, gpkg_path, expected_count):
         """Verifica se GPKG existente tem features e geometrias validas.
@@ -333,7 +334,7 @@ class DownloadZonalTask(SatIrrigaTask):
                     )
 
                 if total_features > 0:
-                    self.setProgress(55 + int((i + 1) * 35 / total_features))
+                    self.setProgress(min(90, 55 + int((i + 1) * 35 / total_features)))
 
             dst_lyr.CommitTransaction()
             # Flush e fecha GPKG e FGB
@@ -360,7 +361,7 @@ class DownloadZonalTask(SatIrrigaTask):
             # ----------------------------------------------------------
             self.signals.status_message.emit("Gravando metadados...")
 
-            write_sidecar(self._gpkg_path, {
+            sidecar_data = {
                 "zonalId": self._zonal_id,
                 "editToken": edit_token,
                 "zonalVersion": zonal_version,
@@ -369,7 +370,11 @@ class DownloadZonalTask(SatIrrigaTask):
                 "expiresAt": expires_at,
                 "etag": response_etag,
                 "downloadedAt": now_iso,
-            })
+            }
+            # Dados enriquecidos do catalogo
+            if self._catalogo_meta:
+                sidecar_data.update(self._catalogo_meta)
+            write_sidecar(self._gpkg_path, sidecar_data)
 
             self.setProgress(100)
             self.signals.status_message.emit("Download concluido!")

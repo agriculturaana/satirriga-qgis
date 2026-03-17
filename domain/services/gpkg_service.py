@@ -167,9 +167,10 @@ def list_local_gpkgs(base_dir: str) -> list:
             except (ValueError, IndexError):
                 pass
 
-        has_sidecar = os.path.exists(sidecar_path(str(gpkg_file)))
+        sc_path = sidecar_path(str(gpkg_file))
+        has_sidecar = os.path.exists(sc_path)
 
-        result.append({
+        entry = {
             "path": str(gpkg_file),
             "mapeamento_id": mapeamento_id,
             "metodo_id": metodo_id,
@@ -177,6 +178,20 @@ def list_local_gpkgs(base_dir: str) -> list:
             "type": gpkg_type,
             "has_sidecar": has_sidecar,
             "size_mb": round(gpkg_file.stat().st_size / (1024 * 1024), 2),
-        })
+        }
+
+        # Enriquece com dados do sidecar (mapeamentoId, dataReferencia, descricao)
+        if has_sidecar:
+            sc_data = read_sidecar(str(gpkg_file))
+            if sc_data.get("mapeamentoId"):
+                entry["mapeamento_id"] = sc_data["mapeamentoId"]
+            if sc_data.get("dataReferencia"):
+                entry["data_referencia"] = sc_data["dataReferencia"]
+            if sc_data.get("descricao"):
+                entry["descricao"] = sc_data["descricao"]
+            if sc_data.get("jobId"):
+                entry["job_id"] = sc_data["jobId"]
+
+        result.append(entry)
 
     return result

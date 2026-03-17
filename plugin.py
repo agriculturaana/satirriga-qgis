@@ -2,7 +2,7 @@ import os
 import traceback
 
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt, QTimer
-from qgis.PyQt.QtGui import QIcon
+from qgis.PyQt.QtGui import QColor, QIcon
 from qgis.PyQt.QtWidgets import QAction
 from qgis.core import QgsMessageLog, Qgis
 
@@ -43,6 +43,8 @@ class SatIrrigaPlugin:
         self._http_client = None
         self._mapeamento_controller = None
         self._config_controller = None
+        self._camadas_badge_original_refresh = None
+        self._signal_connections = []  # [(signal, slot), ...] para cleanup
         self._initialized = False
 
     def _ensure_initialized(self):
@@ -146,6 +148,8 @@ class SatIrrigaPlugin:
         self._log("Plugin v2 carregado")
 
     def unload(self):
+        self._disconnect_all_signals()
+
         for action in self.actions:
             self.iface.removePluginMenu(self.tr("&SatIrriga"), action)
             self.iface.removeToolBarIcon(action)
@@ -205,6 +209,20 @@ class SatIrrigaPlugin:
             self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dock)
             self.dock.show()
 
+    def _connect(self, signal, slot):
+        """Conecta signal/slot e registra para cleanup em unload."""
+        signal.connect(slot)
+        self._signal_connections.append((signal, slot))
+
+    def _disconnect_all_signals(self):
+        """Desconecta todos os sinais registrados via _connect."""
+        for signal, slot in self._signal_connections:
+            try:
+                signal.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
+        self._signal_connections.clear()
+
     def _on_dock_closed(self):
         self.plugin_is_active = False
 
@@ -219,13 +237,14 @@ class SatIrrigaPlugin:
         from .ui.widgets.session_header import SessionHeader
         from .ui.widgets.mapeamentos_tab import MapeamentosTab
         from .ui.widgets.camadas_tab import CamadasTab
+        from .ui.widgets.homologacao_tab import HomologacaoTab
         from .ui.widgets.config_tab import ConfigTab
         from .ui.widgets.logs_tab import LogsTab
         from .ui.widgets.home_tab import HomeTab
         from .app.controllers.attribute_controller import AttributeEditController
 
         # Erros globais -> dialog
-        self._state.error_occurred.connect(self._on_error_occurred)
+        self._connect(self._state.error_occurred, self._on_error_occurred)
 
         # Auth: SessionHeader no header do dock
         session_header = SessionHeader(
@@ -255,30 +274,45 @@ class SatIrrigaPlugin:
         )
         self.dock.set_page_widget(SatIrrigaDock.PAGE_CAMADAS, camadas_tab)
 
-        # Config: page 3
+        # Homologacao: page 3 (visivel apenas para homologadores)
+        homologacao_tab = HomologacaoTab(
+            state=self._state,
+            mapeamento_controller=self._mapeamento_controller,
+        )
+        self.dock.set_page_widget(SatIrrigaDock.PAGE_HOMOLOGACAO, homologacao_tab)
+
+        # Config: page 4
         config_tab = ConfigTab(config_controller=self._config_controller)
         self.dock.set_page_widget(SatIrrigaDock.PAGE_CONFIG, config_tab)
 
-        # Logs: page 4
+        # Logs: page 5
         logs_tab = LogsTab()
         self.dock.set_page_widget(SatIrrigaDock.PAGE_LOGS, logs_tab)
 
         # V2: zonal download -> carregar layer no QGIS
-        self._mapeamento_controller.zonal_download_completed.connect(
-            lambda path, zonal_id: self._on_zonal_download_completed(
-                path, zonal_id, camadas_tab
-            )
+        download_slot = lambda path, zonal_id: self._on_zonal_download_completed(
+            path, zonal_id, camadas_tab
+        )
+        self._connect(
+            self._mapeamento_controller.zonal_download_completed, download_slot
         )
 
         # V2: upload progress bridge -> state
-        self._mapeamento_controller.upload_progress.connect(
-            lambda data: self._state.upload_progress_changed.emit(data)
+        progress_slot = lambda data: self._state.upload_progress_changed.emit(data)
+        self._connect(self._mapeamento_controller.upload_progress, progress_slot)
+
+        # V2: conflict detected -> busca conflitos via controller
+        self._connect(
+            self._mapeamento_controller.conflict_detected, self._on_conflict_detected
         )
 
-        # V2: conflict detected -> placeholder
-        self._mapeamento_controller.conflict_detected.connect(
-            self._on_conflict_detected
+        # V2: conflict data ready -> exibe dialog
+        self._connect(
+            self._mapeamento_controller.conflict_data_ready, self._on_conflict_data_ready
         )
+
+        # Raster: criar camadas XYZ quando prontas
+        self._connect(self._state.raster_layers_ready, self._on_raster_layers_ready)
 
         # Badge de camadas modificadas
         self._connect_camadas_badge(camadas_tab)
@@ -303,6 +337,7 @@ class SatIrrigaPlugin:
             return
 
         original_refresh = camadas_tab._refresh_list
+        self._camadas_badge_original_refresh = original_refresh
 
         def refresh_with_badge():
             original_refresh()
@@ -344,32 +379,76 @@ class SatIrrigaPlugin:
 
         camadas_tab.refresh()
 
+    def _on_raster_layers_ready(self, configs):
+        """Cria camadas raster XYZ no QGIS a partir de RasterLayerConfig."""
+        from qgis.core import (
+            QgsProject, QgsRasterLayer, QgsColorRampShader,
+            QgsRasterShader, QgsSingleBandPseudoColorRenderer,
+        )
+        from .domain.services.gpkg_service import layer_group_name
+
+        if not configs:
+            return
+
+        # Busca ou cria grupo SatIrriga / Raster
+        root = QgsProject.instance().layerTreeRoot()
+        group_name = "SatIrriga / Imagens"
+        group = root.findGroup(group_name)
+        if not group:
+            group = root.insertGroup(0, group_name)
+
+        for config in configs:
+            uri = f"type=xyz&url={config.xyz_url}&zmin=0&zmax=18"
+            layer = QgsRasterLayer(uri, config.name, "wms")
+
+            if not layer.isValid():
+                self._log(
+                    f"Camada raster invalida: {config.name} ({config.xyz_url[:80]}...)",
+                    Qgis.Warning,
+                )
+                continue
+
+            # Simbologia divergente para difImg
+            if config.layer_type == "DIF_IMG":
+                try:
+                    shader = QgsRasterShader()
+                    color_ramp = QgsColorRampShader()
+                    color_ramp.setColorRampType(QgsColorRampShader.Interpolated)
+                    color_ramp.setColorRampItemList([
+                        QgsColorRampShader.ColorRampItem(-1, QColor("#C62828"), "-1"),
+                        QgsColorRampShader.ColorRampItem(0, QColor("#FFFFFF"), "0"),
+                        QgsColorRampShader.ColorRampItem(1, QColor("#1565C0"), "+1"),
+                    ])
+                    shader.setRasterShaderFunction(color_ramp)
+                    renderer = QgsSingleBandPseudoColorRenderer(
+                        layer.dataProvider(), 1, shader
+                    )
+                    layer.setRenderer(renderer)
+                except Exception as e:
+                    self._log(f"Erro ao aplicar simbologia difImg: {e}", Qgis.Warning)
+
+            QgsProject.instance().addMapLayer(layer, False)
+            node = group.addLayer(layer)
+
+            # Visibilidade padrao
+            if not config.is_visible and node:
+                node.setItemVisibilityChecked(False)
+
+            self._log(f"Camada raster carregada: {config.name} ({config.layer_type})")
+
     def _on_conflict_detected(self, batch_uuid):
         """Handler para conflitos detectados durante upload."""
         self._log(f"Conflitos detectados no batch {batch_uuid}")
+        self._mapeamento_controller.fetch_conflicts(batch_uuid)
 
-        # Busca conflitos via API
-        url = self._mapeamento_controller._api_url(
-            f"/zonal/upload/{batch_uuid}/conflicts"
-        )
-        token = self._auth_controller.get_access_token()
-        if not token:
-            self._log("Token nao disponivel para buscar conflitos", Qgis.Warning)
-            return
+    def _on_conflict_data_ready(self, batch_uuid, body):
+        """Exibe dialog de resolucao quando dados de conflito chegam."""
+        import json
 
-        import requests
         try:
-            self._log(f"[HTTP] GET {url} (auth=True)")
-            resp = requests.get(
-                url,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=30,
-            )
-            self._log(f"[HTTP] {resp.status_code} {url}")
-            resp.raise_for_status()
-            data = resp.json()
+            data = json.loads(body)
         except Exception as e:
-            self._log(f"[HTTP] ERRO {url} -> {e}", Qgis.Warning)
+            self._log(f"Erro ao parsear conflitos: {e}", Qgis.Warning)
             return
 
         from .domain.models.conflict import ConflictSet
@@ -381,42 +460,8 @@ class SatIrrigaPlugin:
             conflict_set, parent=self.iface.mainWindow()
         )
         dialog.resolved.connect(
-            lambda decisions: self._resolve_conflicts(batch_uuid, decisions)
+            lambda decisions: self._mapeamento_controller.resolve_conflicts(
+                batch_uuid, decisions
+            )
         )
         dialog.exec_()
-
-    def _resolve_conflicts(self, batch_uuid, decisions):
-        """Envia resolucoes de conflitos para o servidor."""
-        import json
-        import requests
-
-        url = self._mapeamento_controller._api_url(
-            f"/zonal/upload/{batch_uuid}/resolve"
-        )
-        token = self._auth_controller.get_access_token()
-        if not token:
-            self._log("Token nao disponivel para resolver conflitos", Qgis.Warning)
-            return
-
-        try:
-            self._log(f"[HTTP] POST {url} (auth=True)")
-            resp = requests.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                data=json.dumps({"decisions": decisions}),
-                timeout=30,
-            )
-            self._log(f"[HTTP] {resp.status_code} {url}")
-            resp.raise_for_status()
-            self._log(
-                f"Conflitos resolvidos para batch {batch_uuid}: "
-                f"{len(decisions)} decisoes enviadas"
-            )
-        except Exception as e:
-            self._log(f"[HTTP] ERRO {url} -> {e}", Qgis.Warning)
-            self._state.set_error(
-                "upload", f"Erro ao resolver conflitos: {e}"
-            )

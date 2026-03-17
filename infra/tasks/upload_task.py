@@ -116,7 +116,7 @@ class UploadZonalTask(SatIrrigaTask):
                     dst_feat.SetField(new_idx, src_feat.GetField(old_idx))
                 dst_lyr.CreateFeature(dst_feat)
                 if total_features > 0:
-                    self.setProgress(int((i + 1) * 25 / total_features))
+                    self.setProgress(min(25, int((i + 1) * 25 / total_features)))
 
             dst_lyr.CommitTransaction()
             src_ds = None
@@ -225,8 +225,8 @@ class UploadZonalTask(SatIrrigaTask):
                     self._log(f"[HTTP] {poll_resp.status_code} {poll_url}")
                     last_status = batch_status
 
-                # Atualiza progresso: 50 + progressPct * 0.45
-                self.setProgress(50 + int(progress_pct * 0.45))
+                # Atualiza progresso: 50 + progressPct * 0.45 (cap em 95)
+                self.setProgress(min(95, 50 + int(progress_pct * 0.45)))
 
                 try:
                     status_enum = UploadBatchStatusEnum(batch_status)

@@ -15,6 +15,13 @@ class AppState(QObject):
     conflict_detected = pyqtSignal(str)              # batchUuid
     upload_batch_completed = pyqtSignal(str, dict)   # batchUuid, summary
 
+    # Raster
+    raster_layers_ready = pyqtSignal(list)            # List[RasterLayerConfig]
+
+    # Homologacao
+    catalogo_homologacao_changed = pyqtSignal(list)   # List[CatalogoItem]
+    parecer_emitido = pyqtSignal(dict)                # {parecerId, status, message}
+
     # UI feedback
     loading_changed = pyqtSignal(str, bool)          # (operation, is_loading)
     error_occurred = pyqtSignal(str, str)             # (operation, message)
@@ -62,4 +69,4 @@ class AppState(QObject):
     def reset(self):
         self.is_authenticated = False
         self.user = None
-        self._catalogo_items = []
+        self.catalogo_items = []

@@ -289,12 +289,17 @@ class OidcPkceFlow(QObject):
         # automaticamente (OidcPkceFlow tem afinidade com a main thread).
         # QTimer.singleShot não funciona de threading.Thread (sem event loop Qt).
         if error:
+            self._clear_pkce_state()
             self.auth_error.emit(f"Erro SSO: {error}")
         elif state != self._state:
+            self._clear_pkce_state()
             self.auth_error.emit("Falha de segurança: state inválido.")
         elif code:
+            # code_verifier é lido pela SessionManager via .code_verifier
+            # antes de ser limpo no fluxo de token exchange.
             self.auth_code_received.emit(code, self._redirect_uri)
         else:
+            self._clear_pkce_state()
             self.auth_error.emit("Timeout aguardando autenticação.")
 
     def token_endpoint(self) -> str:
@@ -309,8 +314,15 @@ class OidcPkceFlow(QObject):
             f"/protocol/openid-connect/logout"
         )
 
+    def _clear_pkce_state(self):
+        """Limpa state e code_verifier para evitar reutilização."""
+        self._code_verifier = None
+        self._code_challenge = None
+        self._state = None
+
     def cleanup(self):
         """Desliga o loopback server se ainda estiver rodando."""
+        self._clear_pkce_state()
         if self._server:
             try:
                 self._server.shutdown()
