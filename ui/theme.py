@@ -1,8 +1,62 @@
-"""Tema centralizado — QSS aplicado ao dock container.
+"""Tema centralizado — QSS e widgets de design system do dock.
 
 Usa cores da palette do sistema/QGIS por padrao.
 Apenas bordas, padding e elementos de accent sao estilizados explicitamente.
 """
+
+from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtGui import QColor, QPainter, QFont
+from qgis.PyQt.QtWidgets import (
+    QWidget, QHBoxLayout, QLabel, QSizePolicy,
+)
+
+# Paleta de cores do design system (tons escuros da logo SatIrriga)
+ACCENT = "#1976D2"
+
+
+class SectionHeader(QWidget):
+    """Header padronizado para abas — barra accent à esquerda, fundo transparente."""
+
+    def __init__(self, title, subtitle=None, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(28)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        layout = QHBoxLayout()
+        layout.setContentsMargins(10, 0, 8, 0)
+        layout.setSpacing(6)
+
+        title_label = QLabel(title)
+        font = QFont()
+        font.setPixelSize(13)
+        font.setBold(True)
+        title_label.setFont(font)
+        title_label.setStyleSheet("border: none; background: transparent;")
+        layout.addWidget(title_label)
+
+        if subtitle:
+            sub_label = QLabel(subtitle)
+            sub_label.setStyleSheet(
+                "color: #757575; font-size: 11px; border: none; background: transparent;"
+            )
+            layout.addWidget(sub_label)
+
+        layout.addStretch()
+        self._extra_layout = layout
+        self.setLayout(layout)
+
+    def add_widget(self, widget):
+        """Adiciona widget ao lado direito do header (após o stretch)."""
+        self._extra_layout.addWidget(widget)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        # Barra accent esquerda
+        painter.fillRect(0, 4, 3, self.height() - 8, QColor(ACCENT))
+        # Linha inferior discreta
+        painter.setPen(QColor(0, 0, 0, 18))
+        painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
+        painter.end()
 
 DOCK_STYLESHEET = """
 /* Headers de tabela */

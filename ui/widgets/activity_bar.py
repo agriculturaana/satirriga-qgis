@@ -6,7 +6,7 @@ Cores derivadas da QPalette do sistema para compatibilidade com temas claro/escu
 import os
 
 from qgis.PyQt.QtCore import Qt, QSize, pyqtSignal
-from qgis.PyQt.QtGui import QIcon, QPainter, QColor, QFont, QPen, QPalette
+from qgis.PyQt.QtGui import QIcon, QPainter, QColor, QFont, QPen, QPalette, QLinearGradient
 from qgis.PyQt.QtWidgets import (
     QWidget, QVBoxLayout, QPushButton, QButtonGroup, QSizePolicy,
 )
@@ -68,11 +68,11 @@ class NavButton(QPushButton):
         pal = self.palette()
         w, h = self.width(), self.height()
 
-        # Background (hover/active usam mid — levemente diferente do fundo da bar)
+        # Background (hover/active — tons claros translúcidos sobre gradiente escuro)
         if self.isChecked():
-            painter.fillRect(0, 0, w, h, pal.color(QPalette.Mid))
+            painter.fillRect(0, 0, w, h, QColor(255, 255, 255, 30))
         elif self._hovered:
-            painter.fillRect(0, 0, w, h, pal.color(QPalette.Mid))
+            painter.fillRect(0, 0, w, h, QColor(255, 255, 255, 18))
 
         # Barra accent a esquerda (quando ativo)
         if self.isChecked():
@@ -116,12 +116,9 @@ class ActivityBar(QWidget):
         super().__init__(parent)
         self.setFixedWidth(40)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        self.setAutoFillBackground(True)
-
-        # Fundo usa QPalette.Dark — destaca da area de conteudo em qualquer tema
-        pal = self.palette()
-        pal.setColor(QPalette.Window, pal.color(QPalette.Dark))
-        self.setPalette(pal)
+        # Gradiente escuro derivado dos tons da logo SatIrriga
+        self._grad_top = QColor("#163D64")     # Azul médio-escuro (tom da logo)
+        self._grad_bottom = QColor("#1976D2")  # Azul accent da logo
 
         self._layout = QVBoxLayout()
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -172,6 +169,14 @@ class ActivityBar(QWidget):
                 btn.setChecked(True)
                 self.page_changed.emit(page_index)
                 return
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        gradient = QLinearGradient(0, 0, 0, self.height())
+        gradient.setColorAt(0.0, self._grad_top)
+        gradient.setColorAt(1.0, self._grad_bottom)
+        painter.fillRect(self.rect(), gradient)
+        painter.end()
 
     def _on_button_clicked(self, button):
         self.page_changed.emit(button.page_index)

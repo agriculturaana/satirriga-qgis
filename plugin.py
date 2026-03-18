@@ -43,8 +43,12 @@ class SatIrrigaPlugin:
         self._http_client = None
         self._mapeamento_controller = None
         self._config_controller = None
+        self._camadas_tab = None
+        self._upload_history_tab = None
         self._camadas_badge_original_refresh = None
         self._signal_connections = []  # [(signal, slot), ...] para cleanup
+        self._pending_raster_group = None  # Grupo-alvo para rasters do download
+        self._vis_action = None            # Acao de contexto "Ajustar visualizacao"
         self._initialized = False
 
     def _ensure_initialized(self):
@@ -163,6 +167,30 @@ class SatIrrigaPlugin:
             self.toolbar.deleteLater()
             self.toolbar = None
 
+        # Cleanup camadas tab
+        if self._camadas_tab:
+            try:
+                self._camadas_tab.cleanup()
+            except (RuntimeError, AttributeError):
+                pass
+            self._camadas_tab = None
+
+        # Cleanup histórico de envios (temporários de comparação)
+        if self._upload_history_tab:
+            try:
+                self._upload_history_tab.cleanup()
+            except (RuntimeError, AttributeError):
+                pass
+            self._upload_history_tab = None
+
+        # Cleanup acao de contexto raster
+        if hasattr(self, "_vis_action") and self._vis_action:
+            try:
+                self.iface.removeCustomActionForLayerType(self._vis_action)
+            except (RuntimeError, TypeError):
+                pass
+            self._vis_action = None
+
         # Cleanup controllers
         if self._attribute_controller:
             try:
@@ -238,6 +266,7 @@ class SatIrrigaPlugin:
         from .ui.widgets.mapeamentos_tab import MapeamentosTab
         from .ui.widgets.camadas_tab import CamadasTab
         from .ui.widgets.homologacao_tab import HomologacaoTab
+        from .ui.widgets.upload_history_widget import UploadHistoryWidget
         from .ui.widgets.config_tab import ConfigTab
         from .ui.widgets.logs_tab import LogsTab
         from .ui.widgets.home_tab import HomeTab
@@ -268,11 +297,11 @@ class SatIrrigaPlugin:
         self.dock.set_page_widget(SatIrrigaDock.PAGE_MAPEAMENTOS, mapeamentos_tab)
 
         # Camadas: page 2
-        camadas_tab = CamadasTab(
+        self._camadas_tab = CamadasTab(
             state=self._state,
             mapeamento_controller=self._mapeamento_controller,
         )
-        self.dock.set_page_widget(SatIrrigaDock.PAGE_CAMADAS, camadas_tab)
+        self.dock.set_page_widget(SatIrrigaDock.PAGE_CAMADAS, self._camadas_tab)
 
         # Homologacao: page 3 (visivel apenas para homologadores)
         homologacao_tab = HomologacaoTab(
@@ -281,17 +310,34 @@ class SatIrrigaPlugin:
         )
         self.dock.set_page_widget(SatIrrigaDock.PAGE_HOMOLOGACAO, homologacao_tab)
 
-        # Config: page 4
+        # Histórico de envios: page 4
+        self._upload_history_tab = UploadHistoryWidget(
+            state=self._state,
+            mapeamento_controller=self._mapeamento_controller,
+        )
+        self.dock.set_page_widget(SatIrrigaDock.PAGE_HISTORICO, self._upload_history_tab)
+
+        # Config: page 5
         config_tab = ConfigTab(config_controller=self._config_controller)
         self.dock.set_page_widget(SatIrrigaDock.PAGE_CONFIG, config_tab)
 
-        # Logs: page 5
+        # Logs: page 6
         logs_tab = LogsTab()
         self.dock.set_page_widget(SatIrrigaDock.PAGE_LOGS, logs_tab)
 
+        # Histórico: carregar ao autenticar e atualizar após upload
+        self._connect(
+            self._state.auth_state_changed,
+            lambda auth: self._upload_history_tab.load() if auth else None,
+        )
+        self._connect(
+            self._mapeamento_controller.zonal_upload_completed,
+            lambda _path, _zid: self._upload_history_tab.load(),
+        )
+
         # V2: zonal download -> carregar layer no QGIS
-        download_slot = lambda path, zonal_id: self._on_zonal_download_completed(
-            path, zonal_id, camadas_tab
+        download_slot = lambda path, zonal_id, meta: self._on_zonal_download_completed(
+            path, zonal_id, meta, self._camadas_tab
         )
         self._connect(
             self._mapeamento_controller.zonal_download_completed, download_slot
@@ -314,8 +360,11 @@ class SatIrrigaPlugin:
         # Raster: criar camadas XYZ quando prontas
         self._connect(self._state.raster_layers_ready, self._on_raster_layers_ready)
 
+        # Acao de contexto: "Ajustar visualização..." em camadas raster SatIrriga
+        self._setup_raster_context_action()
+
         # Badge de camadas modificadas
-        self._connect_camadas_badge(camadas_tab)
+        self._connect_camadas_badge(self._camadas_tab)
 
         # Attribute edit: abre dialog ao selecionar 1 feature SatIrriga
         self._attribute_controller = AttributeEditController(
@@ -327,8 +376,55 @@ class SatIrrigaPlugin:
             lambda _fid: self._mapeamento_controller.edit_tracking_done.emit()
         )
 
+        # Reconecta edit tracking de camadas SatIrriga já presentes no projeto
+        self._reconnect_existing_layers()
+
         # Garante que Home e a pagina inicial apos o wiring
         self.dock.navigate_to(SatIrrigaDock.PAGE_HOME)
+
+    def _reconnect_existing_layers(self):
+        """Reconecta edit tracking de camadas SatIrriga já presentes no projeto.
+
+        Ao reabrir um projeto QGIS, camadas vetoriais e GPKGs são restauradas
+        nativamente, mas os signals de edit tracking precisam ser reconectados.
+        """
+        from qgis.core import QgsProject, QgsVectorLayer
+        from .domain.services.gpkg_service import read_sidecar, sidecar_path, count_features_by_sync_status
+        import os
+
+        pending_count = 0
+        reconnected = 0
+
+        for layer in QgsProject.instance().mapLayers().values():
+            if not isinstance(layer, QgsVectorLayer):
+                continue
+            source = layer.source().split("|")[0]
+            if not source.endswith(".gpkg"):
+                continue
+            sc_path = sidecar_path(source)
+            if not os.path.exists(sc_path):
+                continue
+            meta = read_sidecar(source)
+            zonal_id = meta.get("zonalId")
+            if not zonal_id:
+                continue
+
+            self._mapeamento_controller.connect_edit_tracking(
+                layer, zonal_id=zonal_id,
+            )
+            reconnected += 1
+
+            counts = count_features_by_sync_status(source)
+            if counts.get("MODIFIED", 0) > 0 or counts.get("NEW", 0) > 0:
+                pending_count += 1
+
+        if pending_count > 0:
+            self._log(
+                f"{pending_count} camada(s) com edicoes pendentes detectada(s)",
+                Qgis.Info,
+            )
+        if reconnected > 0:
+            self._log(f"Reconexao de {reconnected} camada(s) SatIrriga concluida")
 
     def _connect_camadas_badge(self, camadas_tab):
         """Atualiza badge na NavButton de Camadas quando ha features modificadas."""
@@ -350,13 +446,81 @@ class SatIrrigaPlugin:
 
         camadas_tab._refresh_list = refresh_with_badge
 
-    def _on_zonal_download_completed(self, gpkg_path, zonal_id, camadas_tab):
-        """Carrega GPKG V2 (zonal) no projeto QGIS apos download."""
+    def _setup_raster_context_action(self):
+        """Registra acao 'Ajustar visualizacao' no menu de contexto da layer tree.
+
+        A acao e registrada para todas as camadas raster (limitacao da API
+        addCustomActionForLayerType), mas e habilitada/desabilitada
+        dinamicamente via currentLayerChanged para aparecer apenas em
+        camadas SatIrriga (que possuem custom property satirriga/image_id).
+        """
+        from qgis.core import QgsMapLayerType
+
+        self._vis_action = QAction(
+            "Ajustar visualização...", self.iface.mainWindow()
+        )
+        self._vis_action.setEnabled(False)
+        self._vis_action.triggered.connect(self._on_vis_action_triggered)
+        self.iface.addCustomActionForLayerType(
+            self._vis_action,
+            "",
+            QgsMapLayerType.RasterLayer,
+            allLayers=True,
+        )
+
+        # Habilita acao apenas quando camada ativa e raster SatIrriga
+        self._connect(
+            self.iface.layerTreeView().currentLayerChanged,
+            self._on_current_layer_changed_for_vis,
+        )
+
+    def _on_current_layer_changed_for_vis(self, layer):
+        """Habilita/desabilita acao de visualizacao conforme camada ativa."""
+        is_satirriga_raster = (
+            layer is not None
+            and layer.customProperty("satirriga/image_id")
+        )
+        self._vis_action.setEnabled(bool(is_satirriga_raster))
+
+    def _on_vis_action_triggered(self):
+        """Handler da acao de contexto — identifica layer ativa e abre dialogo."""
+        layer = self.iface.activeLayer()
+        if not layer or not layer.customProperty("satirriga/image_id"):
+            return
+        self.customize_raster_vis(layer)
+
+    def _on_zonal_download_completed(self, gpkg_path, zonal_id, catalogo_meta,
+                                     camadas_tab):
+        """Carrega GPKG V2 (zonal) no projeto QGIS apos download.
+
+        Cria grupo nomeado pelo mapeamento, adiciona vetor editavel e
+        dispara carregamento automatico de rasters de referencia.
+        """
         from qgis.core import QgsProject, QgsVectorLayer
         from .domain.services.gpkg_service import layer_group_name
 
+        mapeamento_id = catalogo_meta.get("mapeamentoId")
+        descricao = catalogo_meta.get("descricao", "")
+        job_id = catalogo_meta.get("jobId")
+        metodo_apply = catalogo_meta.get("metodoApply")
+
+        # Nome do grupo: "#42 - Descrição" ou fallback "Zonal {id}"
+        if mapeamento_id:
+            # Limpa HTML/texto longo para legibilidade
+            from qgis.PyQt.QtGui import QTextDocument
+            if descricao:
+                doc = QTextDocument()
+                doc.setHtml(descricao)
+                plain = doc.toPlainText().strip()
+                short_desc = (plain[:60] + "...") if len(plain) > 60 else plain
+            else:
+                short_desc = ""
+            suffix = f"#{mapeamento_id} - {short_desc}" if short_desc else f"#{mapeamento_id}"
+        else:
+            suffix = f"Zonal {zonal_id}"
+
         root = QgsProject.instance().layerTreeRoot()
-        group_name = layer_group_name(f"Zonal {zonal_id}")
+        group_name = layer_group_name(suffix)
         group = root.findGroup(group_name)
         if not group:
             group = root.addGroup(group_name)
@@ -364,7 +528,18 @@ class SatIrrigaPlugin:
         layer = QgsVectorLayer(gpkg_path, f"Zonal {zonal_id}", "ogr")
         if layer.isValid():
             QgsProject.instance().addMapLayer(layer, False)
-            group.addLayer(layer)
+            group.insertLayer(0, layer)
+
+            # Estilo: somente borda laranja, sem preenchimento
+            from qgis.core import QgsFillSymbol
+            symbol = QgsFillSymbol.createSimple({})
+            sl = symbol.symbolLayer(0)
+            sl.setBrushStyle(Qt.NoBrush)
+            sl.setStrokeColor(QColor("#FF6600"))
+            sl.setStrokeWidth(0.8)
+            layer.renderer().setSymbol(symbol)
+            layer.triggerRepaint()
+
             self._log(f"Camada V2 carregada: {gpkg_path}")
 
             self._mapeamento_controller.connect_edit_tracking(
@@ -377,64 +552,156 @@ class SatIrrigaPlugin:
         else:
             self._log(f"Falha ao carregar GPKG V2: {gpkg_path}", Qgis.Warning)
 
+        # Dispara carregamento automatico de rasters de referencia
+        if job_id and metodo_apply:
+            self._pending_raster_group = group
+            self._mapeamento_controller.load_raster_images(job_id, metodo_apply)
+
         camadas_tab.refresh()
 
-    def _on_raster_layers_ready(self, configs):
-        """Cria camadas raster XYZ no QGIS a partir de RasterLayerConfig."""
-        from qgis.core import (
-            QgsProject, QgsRasterLayer, QgsColorRampShader,
-            QgsRasterShader, QgsSingleBandPseudoColorRenderer,
-        )
-        from .domain.services.gpkg_service import layer_group_name
+    def _on_raster_layers_ready(self, hierarchy):
+        """Cria arvore hierarquica de camadas raster XYZ no QGIS.
 
-        if not configs:
+        Hierarquia: Datas > Bandas > Cenas (tiles individuais).
+        """
+        import json as _json
+        from dataclasses import asdict
+        from qgis.core import QgsProject, QgsRasterLayer
+
+        if not hierarchy or not hierarchy.dates:
             return
 
-        # Busca ou cria grupo SatIrriga / Raster
-        root = QgsProject.instance().layerTreeRoot()
-        group_name = "SatIrriga / Imagens"
-        group = root.findGroup(group_name)
+        # Usa grupo-alvo do download (mesmo grupo do vetor) ou fallback
+        group = self._pending_raster_group
+        self._pending_raster_group = None
+
         if not group:
-            group = root.insertGroup(0, group_name)
+            root = QgsProject.instance().layerTreeRoot()
+            group_name = "SatIrriga / Imagens"
+            group = root.findGroup(group_name)
+            if not group:
+                group = root.insertGroup(0, group_name)
 
-        for config in configs:
-            uri = f"type=xyz&url={config.xyz_url}&zmin=0&zmax=18"
-            layer = QgsRasterLayer(uri, config.name, "wms")
+        dates_group = group.addGroup("Datas")
 
-            if not layer.isValid():
-                self._log(
-                    f"Camada raster invalida: {config.name} ({config.xyz_url[:80]}...)",
-                    Qgis.Warning,
-                )
-                continue
+        for date_group in hierarchy.dates:
+            date_node = dates_group.addGroup(date_group.date_label)
 
-            # Simbologia divergente para difImg
-            if config.layer_type == "DIF_IMG":
-                try:
-                    shader = QgsRasterShader()
-                    color_ramp = QgsColorRampShader()
-                    color_ramp.setColorRampType(QgsColorRampShader.Interpolated)
-                    color_ramp.setColorRampItemList([
-                        QgsColorRampShader.ColorRampItem(-1, QColor("#C62828"), "-1"),
-                        QgsColorRampShader.ColorRampItem(0, QColor("#FFFFFF"), "0"),
-                        QgsColorRampShader.ColorRampItem(1, QColor("#1565C0"), "+1"),
-                    ])
-                    shader.setRasterShaderFunction(color_ramp)
-                    renderer = QgsSingleBandPseudoColorRenderer(
-                        layer.dataProvider(), 1, shader
-                    )
-                    layer.setRenderer(renderer)
-                except Exception as e:
-                    self._log(f"Erro ao aplicar simbologia difImg: {e}", Qgis.Warning)
+            for band_group in date_group.bands:
+                band_node = date_node.addGroup(band_group.band_name)
+                band_has_visible = False
 
-            QgsProject.instance().addMapLayer(layer, False)
-            node = group.addLayer(layer)
+                for config in band_group.layers:
+                    uri = f"type=xyz&url={config.xyz_url}&zmin=0&zmax=18"
+                    layer = QgsRasterLayer(uri, config.name, "wms")
 
-            # Visibilidade padrao
-            if not config.is_visible and node:
-                node.setItemVisibilityChecked(False)
+                    if not layer.isValid():
+                        self._log(
+                            f"Camada raster invalida: {config.name}",
+                            Qgis.Warning,
+                        )
+                        continue
 
-            self._log(f"Camada raster carregada: {config.name} ({config.layer_type})")
+                    # Persiste contexto como custom properties para customizacao posterior
+                    if config.image_id:
+                        layer.setCustomProperty("satirriga/image_id", config.image_id)
+                        layer.setCustomProperty(
+                            "satirriga/vis_params",
+                            _json.dumps(asdict(config.vis_params)),
+                        )
+                        layer.setCustomProperty("satirriga/band_key", band_group.band_key)
+
+                    QgsProject.instance().addMapLayer(layer, False)
+                    band_node.addLayer(layer)
+
+                    if config.is_visible:
+                        band_has_visible = True
+
+                # Grupo de banda invisivel por padrao se nenhuma camada e visivel
+                if not band_has_visible:
+                    band_node.setItemVisibilityChecked(False)
+
+        self._log(
+            f"Arvore raster criada: {len(hierarchy.dates)} datas, "
+            f"{sum(len(dg.bands) for dg in hierarchy.dates)} bandas"
+        )
+
+    def customize_raster_vis(self, layer):
+        """Abre dialogo de customizacao para uma camada raster SatIrriga."""
+        import json as _json
+        from dataclasses import asdict
+
+        image_id = layer.customProperty("satirriga/image_id")
+        vis_json = layer.customProperty("satirriga/vis_params")
+        if not image_id or not vis_json:
+            return
+
+        from .domain.models.raster import VisParams
+        from .domain.services.raster_service import build_xyz_url
+        from .ui.dialogs.vis_params_dialog import VisParamsDialog
+
+        vis_params = VisParams(**_json.loads(vis_json))
+
+        dialog = VisParamsDialog(vis_params, parent=self.dock)
+        if dialog.exec_() == VisParamsDialog.Accepted:
+            new_params = dialog.get_params()
+            new_url = build_xyz_url(image_id, new_params)
+            self._replace_raster_layer(layer, new_url, new_params)
+
+    def _replace_raster_layer(self, old_layer, new_url, new_params):
+        """Substitui camada raster XYZ mantendo posicao na arvore.
+
+        QgsRasterLayer XYZ nao suporta alterar URL apos criacao.
+        Estrategia: captura posicao -> remove -> cria novo -> insere na mesma posicao.
+        """
+        import json as _json
+        from dataclasses import asdict
+        from qgis.core import QgsProject, QgsRasterLayer
+
+        root = QgsProject.instance().layerTreeRoot()
+        old_node = root.findLayer(old_layer.id())
+        if not old_node:
+            return
+
+        parent_group = old_node.parent()
+        layer_name = old_layer.name()
+        image_id = old_layer.customProperty("satirriga/image_id")
+        band_key = old_layer.customProperty("satirriga/band_key")
+
+        # Captura indice na lista de filhos do grupo pai
+        children = parent_group.children()
+        insert_idx = children.index(old_node) if old_node in children else -1
+
+        # Remove layer antigo
+        QgsProject.instance().removeMapLayer(old_layer.id())
+
+        # Cria novo layer — encoda & como %26 na URL para evitar que o
+        # parser de URI do QGIS (WMS data provider) confunda query params
+        # da URL do tile com parametros do proprio URI
+        safe_url = new_url.replace("&", "%26")
+        uri = f"type=xyz&url={safe_url}&zmin=0&zmax=18"
+        new_layer = QgsRasterLayer(uri, layer_name, "wms")
+        if not new_layer.isValid():
+            self._log(f"Falha ao recriar camada raster: {layer_name}", Qgis.Warning)
+            return
+
+        # Custom properties
+        if image_id:
+            new_layer.setCustomProperty("satirriga/image_id", image_id)
+        new_layer.setCustomProperty(
+            "satirriga/vis_params", _json.dumps(asdict(new_params))
+        )
+        if band_key:
+            new_layer.setCustomProperty("satirriga/band_key", band_key)
+
+        QgsProject.instance().addMapLayer(new_layer, False)
+
+        if insert_idx >= 0:
+            parent_group.insertLayer(insert_idx, new_layer)
+        else:
+            parent_group.addLayer(new_layer)
+
+        self._log(f"Camada raster atualizada: {layer_name}")
 
     def _on_conflict_detected(self, batch_uuid):
         """Handler para conflitos detectados durante upload."""

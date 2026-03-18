@@ -1,115 +1,376 @@
-"""Servico de raster — constroi configuracoes de camadas XYZ a partir da API tilesMetodos.
+"""Servico de raster — constroi hierarquia de camadas XYZ a partir da API tilesMetodos.
 
-A API tilesMetodos retorna TileData[] (array). Cada item:
+A API GET /api/mapeamento/tilesMetodos?jobId= retorna TileData[] (array).
+Cada item (PrecipitationImageData):
 {
-    url: "https://...",  # RGB base
-    metodo1_response: { url_indices: { class_irri, NDVI, NDWI, albedo } },
+    tile: "T21KYR",                  # ID do tile Sentinel-2
+    data: "2025-10-22T00:00:00Z",    # data de aquisicao
+    id_imagem: "img-12345",          # ID da imagem (para customizacao)
+    url: "https://jobs.snirh.gov.br/tiles/s2/IMG/{z}/{x}/{y}",  # RGB (XYZ)
+    metodo1_response:          { url_indices: { classIrri, NDVI, NDWI, albedo } },
     metodo2_discreto_response: { url_indices: { ... } },
-    metodo2_fuzzy_response: { url_indices: { ... } },
-    metodo3_response: { url_indices: { ... } },
+    metodo2_fuzzy_response:    { url_indices: { ... } },
+    metodo3_response:          { url_indices: { ... } },
+    metodo_automatico_response:{ url_indices: { ... } },
 }
+
+As URLs em ``url`` e ``url_indices`` sao pre-construidas pelo servidor
+(podem incluir tokens/assinaturas) e devem ser usadas diretamente.
+
+Para customizacao de visualizacao, o endpoint direto pode ser usado:
+    https://jobs.snirh.gov.br/tiles/s2/{image_id}/{z}/{x}/{y}?band={index}
 """
 
+from collections import defaultdict
 from typing import List
 
-from ..models.raster import RasterLayerConfig
+from ..models.raster import (
+    BandGroup,
+    DateGroup,
+    RasterHierarchy,
+    RasterLayerConfig,
+    VisParams,
+)
 
 
-# Mapeamento metodoApply -> chave da resposta no TileData
-_METODO_RESPONSE_KEYS = {
-    "METODO_1": "metodo1_response",
-    "METODO_2_DISCRETO": "metodo2_discreto_response",
-    "METODO_2_FUZZY": "metodo2_fuzzy_response",
-    "METODO_3": "metodo3_response",
+# URL base do servidor de tiles (para customizacao de visualizacao)
+_JOBS_BASE = "https://jobs.snirh.gov.br/tiles/s2"
+
+# Chaves de method response no TileData — iteradas em ordem de prioridade
+_ALL_METHOD_KEYS = [
+    "metodo1_response",
+    "metodo2_discreto_response",
+    "metodo2_fuzzy_response",
+    "metodo3_response",
+    "metodo_automatico_response",
+]
+
+# Padroes de visualizacao por banda (espelha S2_BAND_DEFAULTS do jobs-server)
+_BAND_DEFAULTS = {
+    "original":  VisParams(band="original", min_val=0, max_val=3000, gamma=1.2),
+    "NDVI":      VisParams(band="NDVI", min_val=-1, max_val=1, palette="NDVI"),
+    "NDWI":      VisParams(band="NDWI", min_val=-1, max_val=1, palette="NDWI"),
+    "albedo":    VisParams(band="albedo", min_val=0, max_val=1, palette="ALBEDO"),
+    "ET0":       VisParams(band="ET0", min_val=0, max_val=10, palette="ET0"),
+    "classIrri": VisParams(band="classIrri", min_val=1, max_val=1, palette="CLASS_IRRI"),
 }
 
+# Mapeamento: chave em url_indices da API -> (band_key, display_name, layer_type, visible)
+# O servidor pode retornar tanto class_irri (snake) quanto classIrri (camel)
+_INDEX_KEY_MAP = {
+    "classIrri":  ("classIrri", "Classificação", "CLASS_IRRI", True),
+    "class_irri": ("classIrri", "Classificação", "CLASS_IRRI", True),
+    "NDVI":       ("NDVI",      "NDVI",          "NDVI",       False),
+    "NDWI":       ("NDWI",      "NDWI",          "NDWI",       False),
+    "albedo":     ("albedo",    "Albedo",        "ALBEDO",     False),
+    "ET0":        ("ET0",       "ET0",           "ET0",        False),
+}
 
-def build_raster_configs(tile_data, metodo_apply: str) -> List[RasterLayerConfig]:
-    """Constroi lista de RasterLayerConfig a partir da resposta de tilesMetodos.
+# Ordem desejada das bandas na arvore QGIS
+_BAND_ORDER = ["classIrri", "original", "NDVI", "NDWI", "albedo", "ET0"]
+
+# Paletas disponiveis para customizacao
+AVAILABLE_PALETTES = [
+    # Especificas de dominio
+    ("NDVI", "NDVI (branco → verde)"),
+    ("NDWI", "NDWI (branco → azul)"),
+    ("ALBEDO", "Albedo (preto → branco)"),
+    ("ET0", "ET0 (roxo → amarelo)"),
+    ("CLASS_IRRI", "Classificação (dourado)"),
+    # Genericas (matplotlib)
+    ("VIRIDIS", "Viridis"), ("VIRIDIS_R", "Viridis (invertida)"),
+    ("PLASMA", "Plasma"), ("PLASMA_R", "Plasma (invertida)"),
+    ("RDYLGN", "Vermelho-Amarelo-Verde"), ("RDYLGN_R", "Verde-Amarelo-Vermelho"),
+    ("SPECTRAL", "Spectral"), ("SPECTRAL_R", "Spectral (invertida)"),
+    ("HOT", "Hot"), ("HOT_R", "Hot (invertida)"),
+    ("BLUES", "Azuis"), ("BLUES_R", "Azuis (invertida)"),
+    ("GREENS", "Verdes"), ("GREENS_R", "Verdes (invertida)"),
+    ("COOLWARM", "Frio-Quente"), ("COOLWARM_R", "Quente-Frio"),
+    ("TERRAIN", "Terreno"), ("TERRAIN_R", "Terreno (invertida)"),
+]
+
+
+def get_default_vis_params(band: str) -> VisParams:
+    """Retorna VisParams padrao para uma banda. Fallback para original."""
+    defaults = _BAND_DEFAULTS.get(band)
+    if defaults:
+        return VisParams(
+            band=defaults.band,
+            min_val=defaults.min_val,
+            max_val=defaults.max_val,
+            gamma=defaults.gamma,
+            palette=defaults.palette,
+            gain=defaults.gain,
+            bias=defaults.bias,
+        )
+    return VisParams(band=band)
+
+
+def build_xyz_url(image_id: str, vis_params: VisParams) -> str:
+    """URL XYZ com parametros de visualizacao customizados.
+
+    Usado para reconstruir URLs com parametros alterados pelo usuario
+    (via dialogo de customizacao). Para exibicao inicial, usar as URLs
+    pre-construidas retornadas pela API.
+    """
+    url = f"{_JOBS_BASE}/{image_id}/{{z}}/{{x}}/{{y}}?band={vis_params.band}"
+    if vis_params.min_val is not None:
+        url += f"&min={vis_params.min_val}"
+    if vis_params.max_val is not None:
+        url += f"&max={vis_params.max_val}"
+    if vis_params.gamma is not None:
+        url += f"&gamma={vis_params.gamma}"
+    if vis_params.palette:
+        url += f"&palette={vis_params.palette}"
+    if vis_params.gain is not None:
+        url += f"&gain={vis_params.gain}"
+    if vis_params.bias is not None:
+        url += f"&bias={vis_params.bias}"
+    return url
+
+
+def get_tile_url(image_id: str, band: str = "original") -> str:
+    """URL XYZ simples para exibicao inicial. Servidor aplica defaults.
+
+    Gera URL com apenas ``?band=X``, sem parametros extras (min, max,
+    palette). O jobs-server aplica ``S2_BAND_DEFAULTS`` automaticamente
+    quando recebe apenas o parametro ``band``.
+    """
+    return f"{_JOBS_BASE}/{image_id}/{{z}}/{{x}}/{{y}}?band={band}"
+
+
+def build_raster_hierarchy(tile_data, metodo_apply: str) -> RasterHierarchy:
+    """Constroi hierarquia de camadas raster a partir da resposta de tilesMetodos.
+
+    Para tiles com ``id_imagem``, gera URLs diretas ao jobs-server com
+    apenas ``?band=X`` para todas as bandas (servidor aplica defaults).
+    Nao depende de ``url_indices`` ou ``metodo_apply`` para selecao.
+
+    Para tiles legados (sem ``id_imagem``), usa URLs pre-construidas da API.
+
+    O ``image_id`` e preservado em cada config para permitir customizacao
+    posterior via ``build_xyz_url()``.
 
     Args:
         tile_data: JSON da resposta de GET /api/mapeamento/tilesMetodos.
-                   Pode ser list (TileData[]) ou dict (TileData unico).
-        metodo_apply: Chave do metodo (ex: METODO_1, METODO_2_DISCRETO)
+        metodo_apply: Ignorado na selecao de bandas — mantido por assinatura.
 
     Returns:
-        Lista de RasterLayerConfig para carregamento no QGIS.
+        RasterHierarchy com datas > bandas > cenas.
     """
-    # Normaliza: resposta e array, usa primeiro item
-    if isinstance(tile_data, list):
-        if not tile_data:
-            return []
-        tile_data = tile_data[0]
+    if not isinstance(tile_data, list):
+        if isinstance(tile_data, dict):
+            tile_data = [tile_data]
+        else:
+            return RasterHierarchy()
 
-    if not isinstance(tile_data, dict):
-        return []
+    if not tile_data:
+        return RasterHierarchy()
 
-    configs = []
+    # Agrupa tiles por data
+    by_date = defaultdict(list)
+    for item in tile_data:
+        date_iso = _extract_date(item)
+        by_date[date_iso].append(item)
 
-    # RGB base — sempre presente em tile_data["url"]
-    rgb_url = tile_data.get("url")
-    if rgb_url:
-        configs.append(RasterLayerConfig(
-            name="RGB",
-            xyz_url=rgb_url,
-            layer_type="RGB",
-            is_visible=True,
-        ))
+    # Ordena datas (mais recente primeiro); "" vai ao final
+    sorted_dates = sorted(by_date.keys(), reverse=True)
 
-    # Dados do metodo especifico
-    response_key = _METODO_RESPONSE_KEYS.get(metodo_apply)
-    if not response_key:
-        return configs
+    date_groups = []
+    for date_iso in sorted_dates:
+        tiles = by_date[date_iso]
+        date_label = _format_date_label(date_iso)
 
-    metodo_response = tile_data.get(response_key)
-    if not metodo_response:
-        return configs
+        # Coleta layers por band_key para todos os tiles desta data
+        bands_map = {}  # band_key -> list[RasterLayerConfig]
 
-    # url_indices contem as URLs dos indices espectrais
-    url_indices = metodo_response.get("url_indices") or {}
+        for tile_item in tiles:
+            image_id = tile_item.get("id_imagem") or ""
+            tile_name = tile_item.get("tile") or _extract_tile_name(image_id)
 
-    # Indices espectrais (chaves da API: NDVI, NDWI, albedo — case-sensitive)
-    _add_index_config(configs, url_indices, "albedo", "Albedo", "ALBEDO")
-    _add_index_config(configs, url_indices, "NDWI", "NDWI", "NDWI")
-    _add_index_config(configs, url_indices, "NDVI", "NDVI", "NDVI")
+            if image_id:
+                # Acesso direto: gera URL simples para TODAS as bandas
+                _build_direct_layers(bands_map, image_id, tile_name)
+            else:
+                # Legado: usa URLs pre-construidas da API
+                _build_legacy_layers(bands_map, tile_item, tile_name, image_id)
 
-    # Classificacao de irrigacao
-    class_url = url_indices.get("class_irri")
-    if class_url:
-        configs.append(RasterLayerConfig(
-            name="Classificação",
-            xyz_url=class_url,
-            layer_type="CLASS_IRRI",
-            is_visible=True,
-        ))
-
-    # difImg (metodos 2a/2b) — stub: chave ainda nao implementada no jobs-server
-    if metodo_apply in ("METODO_2_DISCRETO", "METODO_2_FUZZY"):
-        dif_url = url_indices.get("dif_img") or url_indices.get("difImg")
-        if dif_url:
-            configs.append(RasterLayerConfig(
-                name="Diferença Temporal",
-                xyz_url=dif_url,
-                layer_type="DIF_IMG",
-                is_visible=True,
+        # Monta BandGroups na ordem definida por _BAND_ORDER
+        band_groups = []
+        for band_key in _BAND_ORDER:
+            layers = bands_map.get(band_key)
+            if not layers:
+                continue
+            # Determina display_name e band_key
+            if band_key == "original":
+                band_name = "RGB"
+            else:
+                # Pega do primeiro layer
+                band_name = next(
+                    (dn for k, dn, _, _ in _INDEX_KEY_MAP.values()
+                     if k == band_key),
+                    band_key,
+                )
+            band_groups.append(BandGroup(
+                band_name=band_name,
+                band_key=band_key,
+                layers=layers,
             ))
 
+        if band_groups:
+            date_groups.append(DateGroup(
+                date_label=date_label,
+                date_iso=date_iso,
+                bands=band_groups,
+            ))
+
+    return RasterHierarchy(dates=date_groups)
+
+
+def _build_direct_layers(bands_map: dict, image_id: str, tile_name: str):
+    """Gera layers para TODAS as bandas via URL direta (tiles com image_id).
+
+    Usa ``get_tile_url`` para gerar URL simples com apenas ``?band=X``.
+    O servidor aplica parametros de visualizacao padrao automaticamente.
+    """
+    # Mapeamento: band_key -> (display_name, layer_type, default_visible)
+    _DIRECT_BANDS = {
+        "original":  ("RGB",            "RGB",        True),
+        "classIrri": ("Classificação",  "CLASS_IRRI", True),
+        "NDVI":      ("NDVI",           "NDVI",       False),
+        "NDWI":      ("NDWI",           "NDWI",       False),
+        "albedo":    ("Albedo",         "ALBEDO",     False),
+        "ET0":       ("ET0",            "ET0",        False),
+    }
+
+    for band_key in _BAND_ORDER:
+        info = _DIRECT_BANDS.get(band_key)
+        if not info:
+            continue
+        display_name, layer_type, default_visible = info
+
+        bands_map.setdefault(band_key, []).append(
+            RasterLayerConfig(
+                name=tile_name or display_name,
+                xyz_url=get_tile_url(image_id, band_key),
+                layer_type=layer_type,
+                tile=tile_name,
+                image_id=image_id,
+                vis_params=get_default_vis_params(band_key),
+                is_visible=default_visible,
+            )
+        )
+
+
+def _build_legacy_layers(bands_map: dict, tile_item: dict,
+                         tile_name: str, image_id: str):
+    """Gera layers para tiles legados (sem image_id) usando URLs da API.
+
+    RGB vem do campo ``url``; indices espectrais de ``url_indices``
+    encontrado no primeiro method response disponivel.
+    """
+    # RGB: URL pre-construida do campo "url"
+    rgb_url = tile_item.get("url")
+    if rgb_url:
+        bands_map.setdefault("original", []).append(
+            RasterLayerConfig(
+                name=tile_name or "RGB",
+                xyz_url=rgb_url,
+                layer_type="RGB",
+                tile=tile_name,
+                image_id=image_id,
+                vis_params=get_default_vis_params("original"),
+                is_visible=True,
+            )
+        )
+
+    # Indices espectrais: URLs pre-construidas de url_indices
+    url_indices = _find_url_indices(tile_item)
+    for api_key, index_url in url_indices.items():
+        if not index_url:
+            continue
+        mapping = _INDEX_KEY_MAP.get(api_key)
+        if not mapping:
+            continue
+        band_key, display_name, layer_type, default_visible = mapping
+
+        bands_map.setdefault(band_key, []).append(
+            RasterLayerConfig(
+                name=tile_name or display_name,
+                xyz_url=index_url,
+                layer_type=layer_type,
+                tile=tile_name,
+                image_id=image_id,
+                vis_params=get_default_vis_params(band_key),
+                is_visible=default_visible,
+            )
+        )
+
+
+def _find_url_indices(tile_item: dict) -> dict:
+    """Encontra url_indices no primeiro method response disponivel do tile.
+
+    Itera todos os method response keys conhecidos e retorna o primeiro
+    url_indices nao vazio, sem depender de metodo_apply.
+    """
+    for key in _ALL_METHOD_KEYS:
+        resp = tile_item.get(key)
+        if resp and isinstance(resp, dict):
+            url_indices = resp.get("url_indices")
+            if url_indices and isinstance(url_indices, dict):
+                return url_indices
+    return {}
+
+
+def _extract_date(tile_item: dict) -> str:
+    """Extrai data ISO de um tile, tentando campos comuns da API."""
+    for key in ("data", "date", "dataReferencia", "scanDate"):
+        val = tile_item.get(key)
+        if val and isinstance(val, str):
+            return val.split("T")[0]  # normaliza para YYYY-MM-DD
+    return ""
+
+
+def _format_date_label(date_iso: str) -> str:
+    """Converte data ISO (YYYY-MM-DD) para formato brasileiro (DD/MM/YYYY)."""
+    if not date_iso:
+        return "Sem data"
+    try:
+        parts = date_iso.split("T")[0].split("-")
+        if len(parts) == 3:
+            return f"{parts[2]}/{parts[1]}/{parts[0]}"
+    except (ValueError, IndexError):
+        pass
+    return date_iso
+
+
+def _extract_tile_name(image_id: str) -> str:
+    """Extrai nome do tile a partir do image_id Sentinel-2.
+
+    Ex: "S2A_MSIL2A_20251022T132231_N0511_R038_T24MXT_20251022T172030"
+        -> "24MXT"
+    """
+    if not image_id:
+        return ""
+    parts = image_id.split("_")
+    for part in parts:
+        if part.startswith("T") and len(part) == 6:
+            return part[1:]  # Remove prefixo "T"
+    return ""
+
+
+# ----------------------------------------------------------------
+# Compatibilidade com codigo legado
+# ----------------------------------------------------------------
+
+def build_raster_configs(tile_data, metodo_apply: str) -> List[RasterLayerConfig]:
+    """Wrapper de compatibilidade — retorna lista plana de RasterLayerConfig.
+
+    DEPRECATED: Usar build_raster_hierarchy() para hierarquia completa.
+    """
+    hierarchy = build_raster_hierarchy(tile_data, metodo_apply)
+    configs = []
+    for date_group in hierarchy.dates:
+        for band_group in date_group.bands:
+            configs.extend(band_group.layers)
     return configs
-
-
-def _add_index_config(
-    configs: List[RasterLayerConfig],
-    url_indices: dict,
-    key: str,
-    name: str,
-    layer_type: str,
-):
-    """Adiciona config de indice espectral se URL presente."""
-    url = url_indices.get(key)
-    if url:
-        configs.append(RasterLayerConfig(
-            name=name,
-            xyz_url=url,
-            layer_type=layer_type,
-            is_visible=False,  # Indices invisiveis por padrao
-        ))

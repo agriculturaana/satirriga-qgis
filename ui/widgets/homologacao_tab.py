@@ -1,20 +1,30 @@
-"""Aba de homologacao — tabela de zonais para aprovacao/reprovacao."""
+"""Aba de homologação — cards de zonais para aprovação/reprovação."""
 
-from qgis.PyQt.QtCore import Qt
-from qgis.PyQt.QtGui import QColor
+import os
+from datetime import datetime
+
+from qgis.PyQt.QtCore import Qt, QSize, QTimer
+from qgis.PyQt.QtGui import QColor, QIcon, QTextDocument, QFontMetrics
 from qgis.PyQt.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox,
-    QTableWidget, QTableWidgetItem, QHeaderView, QLabel,
-    QAbstractItemView,
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QLineEdit,
+    QLabel, QListWidget, QListWidgetItem, QFrame, QSizePolicy,
+    QGraphicsDropShadowEffect, QMessageBox,
+)
+
+_ICONS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "assets", "icons",
 )
 
 from qgis.core import QgsMessageLog, Qgis
+
+from ..theme import SectionHeader
 
 from ...domain.models.enums import ZonalStatusEnum
 from ...infra.config.settings import PLUGIN_NAME
 
 
-# Filtros de status disponiveis
+# Filtros de status disponíveis
 _STATUS_FILTERS = {
     "Aguardando": "AGUARDANDO",
     "Homologados": "HOMOLOGADO",
@@ -25,13 +35,21 @@ _STATUS_FILTERS = {
 
 
 class HomologacaoTab(QWidget):
-    """Tabela dedicada para mapeamentos em homologacao."""
+    """Cards dedicados para mapeamentos em homologação."""
 
     def __init__(self, state, mapeamento_controller, parent=None):
         super().__init__(parent)
         self._state = state
         self._controller = mapeamento_controller
         self._items = []
+        self._current_page = 1
+        self._total_pages = 1
+        self._total_items = 0
+
+        # Debounce para filtros textuais
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.timeout.connect(self._load_data)
 
         self._build_ui()
         self._connect_signals()
@@ -44,46 +62,88 @@ class HomologacaoTab(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
-        # Header com filtro
-        header = QHBoxLayout()
-        header.addWidget(QLabel("Homologação de mapeamentos"))
-        header.addStretch()
-
-        # Filtro de status
-        self._status_filter = QComboBox()
-        self._status_filter.setFixedWidth(130)
-        for label in _STATUS_FILTERS:
-            self._status_filter.addItem(label)
-        self._status_filter.setCurrentIndex(0)  # Aguardando por padrao
-        self._status_filter.currentIndexChanged.connect(self._on_filter_changed)
-        header.addWidget(self._status_filter)
-
+        # Header
+        section_header = SectionHeader("Homologação", "mapeamentos")
         self._refresh_btn = QPushButton("Atualizar")
         self._refresh_btn.setFixedWidth(80)
         self._refresh_btn.clicked.connect(self._load_data)
-        header.addWidget(self._refresh_btn)
-        layout.addLayout(header)
+        section_header.add_widget(self._refresh_btn)
+        layout.addWidget(section_header)
 
-        # Tabela — 8 colunas
-        self._table = QTableWidget()
-        self._table.setColumnCount(8)
-        self._table.setHorizontalHeaderLabels([
-            "#ID", "Data Ref.", "Descrição", "Método", "Autor",
-            "Status", "Features / Área", "Ações",
-        ])
-        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self._table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        self._table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        self._table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
-        self._table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeToContents)
-        self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self._table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self._table.verticalHeader().setVisible(False)
-        layout.addWidget(self._table)
+        # Filtros textuais (ID, autor, descrição)
+        filter_row1 = QHBoxLayout()
+        filter_row1.setSpacing(4)
+
+        self._filter_id = QLineEdit()
+        self._filter_id.setPlaceholderText("ID")
+        self._filter_id.setFixedWidth(60)
+        self._filter_id.setClearButtonEnabled(True)
+        self._filter_id.textChanged.connect(self._on_text_filter_changed)
+        filter_row1.addWidget(self._filter_id)
+
+        self._filter_author = QLineEdit()
+        self._filter_author.setPlaceholderText("Autor...")
+        self._filter_author.setClearButtonEnabled(True)
+        self._filter_author.textChanged.connect(self._on_text_filter_changed)
+        filter_row1.addWidget(self._filter_author, 1)
+
+        self._filter_descricao = QLineEdit()
+        self._filter_descricao.setPlaceholderText("Descrição...")
+        self._filter_descricao.setClearButtonEnabled(True)
+        self._filter_descricao.textChanged.connect(self._on_text_filter_changed)
+        filter_row1.addWidget(self._filter_descricao, 2)
+
+        layout.addLayout(filter_row1)
+
+        # Filtro de status
+        filter_row2 = QHBoxLayout()
+        filter_row2.setSpacing(4)
+
+        self._status_filter = QComboBox()
+        for label in _STATUS_FILTERS:
+            self._status_filter.addItem(label)
+        self._status_filter.setCurrentIndex(0)
+        self._status_filter.currentIndexChanged.connect(self._on_filter_changed)
+        filter_row2.addWidget(self._status_filter, 1)
+
+        layout.addLayout(filter_row2)
+
+        # Lista de cards
+        self._card_list = QListWidget()
+        self._card_list.setSelectionMode(QListWidget.NoSelection)
+        self._card_list.setFocusPolicy(Qt.NoFocus)
+        self._card_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._card_list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        self._card_list.setSpacing(4)
+        self._card_list.setStyleSheet(
+            "QListWidget { border: none; background: transparent; }"
+            "QListWidget::item { border: none; background: transparent; }"
+        )
+        layout.addWidget(self._card_list, 1)
+
+        # Paginação
+        pag = QHBoxLayout()
+        pag.setContentsMargins(0, 2, 0, 0)
+        pag.setSpacing(4)
+
+        self._btn_prev = QPushButton()
+        self._btn_prev.setIcon(QIcon(os.path.join(_ICONS_DIR, "pagination_prev.svg")))
+        self._btn_prev.setFixedWidth(32)
+        self._btn_prev.clicked.connect(self._on_prev_page)
+        pag.addWidget(self._btn_prev)
+
+        self._page_label = QLabel()
+        self._page_label.setAlignment(Qt.AlignCenter)
+        self._page_label.setStyleSheet("font-size: 11px;")
+        pag.addWidget(self._page_label, 1)
+
+        self._btn_next = QPushButton()
+        self._btn_next.setIcon(QIcon(os.path.join(_ICONS_DIR, "pagination_next.svg")))
+        self._btn_next.setFixedWidth(32)
+        self._btn_next.clicked.connect(self._on_next_page)
+        pag.addWidget(self._btn_next)
+
+        layout.addLayout(pag)
 
         # Status label
         self._status_label = QLabel()
@@ -94,33 +154,276 @@ class HomologacaoTab(QWidget):
 
         self.setLayout(layout)
 
+    # ================================================================
+    # Card factory
+    # ================================================================
+
+    def _create_card(self, item):
+        """Cria widget de card para um CatalogoItem de homologação."""
+        card = QWidget()
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setStyleSheet(
+            "QWidget#satirriga_card { border: 1px solid palette(mid); border-radius: 6px;"
+            " padding: 6px; background: palette(base); }"
+        )
+        card.setObjectName("satirriga_card")
+
+        shadow = QGraphicsDropShadowEffect(card)
+        shadow.setBlurRadius(8)
+        shadow.setOffset(0, 2)
+        shadow.setColor(QColor(0, 0, 0, 40))
+        card.setGraphicsEffect(shadow)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(3)
+
+        # --- Linha 1: #ID + status badge ---
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
+
+        id_label = QLabel(f"<b>#{item.mapeamento_id or 0}</b>")
+        id_label.setStyleSheet("font-size: 13px;")
+        row1.addWidget(id_label)
+
+        status_text = item.status
+        status_color = "#9E9E9E"
+        try:
+            status_enum = ZonalStatusEnum(item.status)
+            status_text = status_enum.label
+            status_color = status_enum.color
+        except ValueError:
+            pass
+
+        badge = QLabel(status_text)
+        badge.setStyleSheet(
+            f"background-color: {status_color}; color: white;"
+            " border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: bold;"
+        )
+        badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        row1.addWidget(badge)
+
+        row1.addStretch()
+        layout.addLayout(row1)
+
+        # --- Linha 2: data + método + máscara ---
+        data_ref = "—"
+        if item.data_referencia:
+            try:
+                dt = datetime.fromisoformat(
+                    item.data_referencia.replace("Z", "+00:00")
+                )
+                data_ref = dt.strftime("%d/%m/%Y")
+            except (ValueError, AttributeError):
+                data_ref = item.data_referencia[:10]
+
+        metodo_label = self._format_metodo(item.metodo_apply) if item.metodo_apply else "—"
+        meta_parts = [data_ref, metodo_label]
+        if item.mascara_nome:
+            meta_parts.append(item.mascara_nome)
+        meta = QLabel("  ·  ".join(meta_parts))
+        meta.setStyleSheet("font-size: 11px; color: #757575;")
+        layout.addWidget(meta)
+
+        # --- Linha 2b: data de edição ---
+        if item.processed_at:
+            try:
+                dt_edit = datetime.fromisoformat(
+                    item.processed_at.replace("Z", "+00:00")
+                )
+                edit_date = dt_edit.strftime("%d/%m/%Y")
+            except (ValueError, AttributeError):
+                edit_date = str(item.processed_at)[:10]
+            edit_label = QLabel(f"Editado em: {edit_date}")
+            edit_label.setStyleSheet("font-size: 10px; color: #757575;")
+            layout.addWidget(edit_label)
+
+        # --- Linha 2c: dados de homologação (quando HOMOLOGADO) ---
+        if item.status == "HOMOLOGADO" and item.homologado_at:
+            try:
+                dt_hom = datetime.fromisoformat(
+                    item.homologado_at.replace("Z", "+00:00")
+                )
+                hom_date = dt_hom.strftime("%d/%m/%Y")
+            except (ValueError, AttributeError):
+                hom_date = str(item.homologado_at)[:10]
+            hom_text = f"Homologado em: {hom_date}"
+            if item.homologador_nome:
+                hom_text += f" por {item.homologador_nome}"
+            hom_label = QLabel(hom_text)
+            hom_label.setStyleSheet("font-size: 10px; color: #2E7D32;")
+            layout.addWidget(hom_label)
+
+        # --- Linha 3: descrição HTML (máximo 3 linhas) ---
+        desc_label = QLabel()
+        desc_label.setTextFormat(Qt.RichText)
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet("font-size: 11px; padding: 0;")
+        line_height = QFontMetrics(desc_label.font()).lineSpacing()
+        desc_label.setMaximumHeight(line_height * 3 + 4)
+
+        plain = ""
+        if item.descricao:
+            doc = QTextDocument()
+            doc.setHtml(item.descricao)
+            plain = doc.toPlainText().strip()
+
+        if plain:
+            fm = QFontMetrics(desc_label.font())
+            max_width = 400
+            lines = plain.split("\n")
+            displayed = []
+            for line in lines:
+                if len(displayed) >= 3:
+                    break
+                elided = fm.elidedText(line, Qt.ElideRight, max_width)
+                displayed.append(elided)
+            desc_label.setText("<br>".join(displayed))
+            desc_label.setToolTip(plain)
+        else:
+            desc_label.setText("<i style='color:#9E9E9E'>Sem descrição</i>")
+
+        layout.addWidget(desc_label)
+
+        # --- Linha 4: autor + features/área ---
+        row4 = QHBoxLayout()
+        row4.setSpacing(6)
+
+        author = QLabel(f"Autor: {item.author or '—'}")
+        author.setStyleSheet("font-size: 11px; color: #757575;")
+        row4.addWidget(author)
+
+        row4.addStretch()
+
+        feat_area = f"{item.result_count or 0} feições  ·  {(item.total_area_ha or 0):,.1f} ha"
+        stats = QLabel(feat_area)
+        stats.setStyleSheet("font-size: 11px; color: #757575;")
+        row4.addWidget(stats)
+
+        layout.addLayout(row4)
+
+        # --- Linha 5: ações ---
+        row5 = QHBoxLayout()
+        row5.setSpacing(4)
+        row5.addStretch()
+
+        btn_download = QPushButton("Baixar")
+        btn_download.setToolTip("Baixar resultado zonal como GeoPackage editável")
+        btn_download.setStyleSheet(
+            "QPushButton { background-color: #1976D2; color: white;"
+            " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
+            "QPushButton:hover { background-color: #1565C0; }"
+            "QPushButton:disabled { background-color: #90CAF9; }"
+        )
+        btn_download.clicked.connect(
+            lambda _, zid=item.id, ci=item: self._on_download(zid, ci)
+        )
+        row5.addWidget(btn_download)
+
+        if item.status == "AGUARDANDO":
+            btn_aprovar = QPushButton("Aprovar")
+            btn_aprovar.setStyleSheet(
+                "QPushButton { background-color: #2E7D32; color: white;"
+                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #1B5E20; }"
+            )
+            btn_aprovar.clicked.connect(
+                lambda _, zid=item.id: self._on_parecer(zid)
+            )
+            row5.addWidget(btn_aprovar)
+
+            btn_reprovar = QPushButton("Reprovar")
+            btn_reprovar.setStyleSheet(
+                "QPushButton { background-color: #C62828; color: white;"
+                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #B71C1C; }"
+            )
+            btn_reprovar.clicked.connect(
+                lambda _, zid=item.id: self._on_parecer(zid)
+            )
+            row5.addWidget(btn_reprovar)
+
+        elif item.status == "HOMOLOGADO":
+            btn_retirar = QPushButton("Retirar")
+            btn_retirar.setToolTip("Retirar homologação — reverte para reanálise")
+            btn_retirar.setStyleSheet(
+                "QPushButton { background-color: #E65100; color: white;"
+                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #BF360C; }"
+            )
+            btn_retirar.clicked.connect(
+                lambda _, zid=item.id: self._on_retirar(zid)
+            )
+            row5.addWidget(btn_retirar)
+
+        # Suprimir mapeamento (visível para homologadores em qualquer status)
+        if item.mapeamento_id:
+            btn_suprimir = QPushButton("Suprimir")
+            btn_suprimir.setToolTip("Excluir mapeamento definitivamente")
+            btn_suprimir.setStyleSheet(
+                "QPushButton { background-color: #7B1FA2; color: white;"
+                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #4A148C; }"
+            )
+            btn_suprimir.clicked.connect(
+                lambda _, mid=item.mapeamento_id: self._on_suprimir(mid)
+            )
+            row5.addWidget(btn_suprimir)
+
+        layout.addLayout(row5)
+
+        card.setLayout(layout)
+        card._download_btn = btn_download
+        card._zonal_id = item.id
+        return card
+
+    # ================================================================
+    # Signals / slots
+    # ================================================================
+
     def _connect_signals(self):
         self._state.loading_changed.connect(self._on_loading_changed)
         self._state.error_occurred.connect(self._on_error)
         self._state.auth_state_changed.connect(self._on_auth_changed)
         self._state.catalogo_homologacao_changed.connect(self._on_data_loaded)
         self._state.parecer_emitido.connect(self._on_parecer_emitido)
+        self._state.mapeamento_suprimido.connect(self._on_mapeamento_suprimido)
 
     def _on_auth_changed(self, is_authenticated):
         if is_authenticated:
             self._load_data()
         else:
-            self._table.setRowCount(0)
+            self._card_list.clear()
+
+    def _on_text_filter_changed(self, _text):
+        """Debounce nos filtros textuais — reseta para página 1."""
+        self._current_page = 1
+        self._search_timer.start(400)
 
     def _on_filter_changed(self, _index):
+        self._current_page = 1
         self._load_data()
 
     def _load_data(self):
-        """Carrega catalogo de homologacao com filtro selecionado."""
+        """Carrega catálogo de homologação com filtros e paginação."""
         filter_text = self._status_filter.currentText()
         status = _STATUS_FILTERS.get(filter_text, "AGUARDANDO")
-        self._controller.load_catalogo_homologacao(status_filter=status)
+        self._controller.load_catalogo_homologacao(
+            status_filter=status,
+            mapeamento_id=self._filter_id.text().strip(),
+            author=self._filter_author.text().strip(),
+            descricao=self._filter_descricao.text().strip(),
+            page=self._current_page,
+            size=20,
+        )
 
-    def _on_data_loaded(self, items):
-        """Atualiza tabela com itens recebidos."""
+    def _on_data_loaded(self, items, pagination):
+        """Atualiza cards com itens recebidos."""
         self._items = items
-        self._table.setSortingEnabled(False)
-        self._table.setRowCount(0)
+        self._current_page = pagination.get("page", 1)
+        self._total_pages = pagination.get("totalPages", 1)
+        self._total_items = pagination.get("total", len(items))
+        self._card_list.clear()
 
         if not items:
             self._status_label.setText("Nenhum mapeamento encontrado")
@@ -128,116 +431,47 @@ class HomologacaoTab(QWidget):
             return
 
         self._status_label.setVisible(False)
-        self._table.setRowCount(len(items))
 
-        for i, item in enumerate(items):
-            # #ID
-            id_item = QTableWidgetItem()
-            id_item.setData(Qt.DisplayRole, item.mapeamento_id or 0)
-            self._table.setItem(i, 0, id_item)
+        for item in items:
+            card = self._create_card(item)
+            list_item = QListWidgetItem(self._card_list)
+            list_item.setSizeHint(card.sizeHint() + QSize(0, 8))
+            self._card_list.addItem(list_item)
+            self._card_list.setItemWidget(list_item, card)
 
-            # Data Ref.
-            data_ref = "—"
-            if item.data_referencia:
-                try:
-                    from datetime import datetime
-                    dt = datetime.fromisoformat(
-                        item.data_referencia.replace("Z", "+00:00")
-                    )
-                    data_ref = dt.strftime("%d/%m/%Y")
-                except (ValueError, AttributeError):
-                    data_ref = item.data_referencia[:10]
-            self._table.setItem(i, 1, QTableWidgetItem(data_ref))
+        self._update_pagination()
 
-            # Descricao
-            desc_label = QLabel(item.descricao)
-            desc_label.setTextFormat(Qt.RichText)
-            desc_label.setWordWrap(True)
-            desc_label.setStyleSheet("padding: 2px 4px;")
-            self._table.setCellWidget(i, 2, desc_label)
+    # ================================================================
+    # Paginação
+    # ================================================================
 
-            # Metodo
-            metodo = self._format_metodo(item.metodo_apply) if item.metodo_apply else "—"
-            self._table.setItem(i, 3, QTableWidgetItem(metodo))
+    def _on_prev_page(self):
+        if self._current_page > 1:
+            self._current_page -= 1
+            self._load_data()
 
-            # Autor
-            self._table.setItem(i, 4, QTableWidgetItem(item.author or "—"))
+    def _on_next_page(self):
+        if self._current_page < self._total_pages:
+            self._current_page += 1
+            self._load_data()
 
-            # Status chip
-            status_item = QTableWidgetItem(item.status)
-            try:
-                status_enum = ZonalStatusEnum(item.status)
-                status_item.setText(status_enum.label)
-                status_item.setForeground(QColor(status_enum.color))
-            except ValueError:
-                pass
-            self._table.setItem(i, 5, status_item)
-
-            # Features / Area
-            feat_area = f"{item.result_count or 0} / {(item.total_area_ha or 0):,.1f} ha"
-            self._table.setItem(i, 6, QTableWidgetItem(feat_area))
-
-            # Acoes
-            actions = self._build_action_buttons(item)
-            self._table.setCellWidget(i, 7, actions)
-
-        self._table.resizeRowsToContents()
-
-    def _build_action_buttons(self, item):
-        """Cria botoes de acao condicionais ao status."""
-        widget = QWidget()
-        layout = QHBoxLayout()
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(4)
-
-        # Baixar — sempre disponivel
-        btn_download = QPushButton("Baixar")
-        btn_download.setFixedWidth(50)
-        btn_download.setStyleSheet(
-            "QPushButton { background-color: #1976D2; color: white; "
-            "border: none; padding: 2px 6px; border-radius: 3px; font-size: 11px; }"
-            "QPushButton:hover { background-color: #1565C0; }"
+    def _update_pagination(self):
+        total = self._total_items
+        suffix = "registro" if total == 1 else "registros"
+        self._page_label.setText(
+            f"Página {self._current_page} de {self._total_pages}  ({total} {suffix})"
         )
-        btn_download.clicked.connect(
-            lambda _, zid=item.id, ci=item: self._on_download(zid, ci)
-        )
-        layout.addWidget(btn_download)
+        self._btn_prev.setEnabled(self._current_page > 1)
+        self._btn_next.setEnabled(self._current_page < self._total_pages)
 
-        # Aprovar e Reprovar — apenas para AGUARDANDO
-        if item.status == "AGUARDANDO":
-            btn_aprovar = QPushButton("Aprovar")
-            btn_aprovar.setFixedWidth(55)
-            btn_aprovar.setStyleSheet(
-                "QPushButton { background-color: #2E7D32; color: white; "
-                "border: none; padding: 2px 6px; border-radius: 3px; font-size: 11px; }"
-                "QPushButton:hover { background-color: #1B5E20; }"
-            )
-            btn_aprovar.clicked.connect(
-                lambda _, zid=item.id: self._on_parecer(zid)
-            )
-            layout.addWidget(btn_aprovar)
-
-            btn_reprovar = QPushButton("Reprovar")
-            btn_reprovar.setFixedWidth(60)
-            btn_reprovar.setStyleSheet(
-                "QPushButton { background-color: #C62828; color: white; "
-                "border: none; padding: 2px 6px; border-radius: 3px; font-size: 11px; }"
-                "QPushButton:hover { background-color: #B71C1C; }"
-            )
-            btn_reprovar.clicked.connect(
-                lambda _, zid=item.id: self._on_parecer(zid)
-            )
-            layout.addWidget(btn_reprovar)
-
-        widget.setLayout(layout)
-        return widget
+    # ================================================================
+    # Actions
+    # ================================================================
 
     def _on_download(self, zonal_id, catalogo_item):
-        """Inicia download do zonal."""
         self._controller.download_zonal_result(zonal_id, catalogo_item=catalogo_item)
 
     def _on_parecer(self, zonal_id):
-        """Abre dialogo de parecer para o zonal."""
         from ..dialogs.parecer_dialog import ParecerDialog
 
         dialog = ParecerDialog(zonal_id, parent=self)
@@ -247,9 +481,42 @@ class HomologacaoTab(QWidget):
                 decisao, motivo = result
                 self._controller.emitir_parecer(zonal_id, decisao, motivo)
 
+    def _on_retirar(self, zonal_id):
+        """Retirar homologação — submete parecer CANCELADO para zonal HOMOLOGADO."""
+        from ..dialogs.parecer_dialog import ParecerDialog
+
+        dialog = ParecerDialog(zonal_id, parent=self)
+        dialog.setWindowTitle("Retirar homologação")
+        if dialog.exec_() == ParecerDialog.Accepted:
+            result = dialog.get_result()
+            if result:
+                _decisao, motivo = result
+                self._controller.emitir_parecer(zonal_id, "CANCELADO", motivo)
+
+    def _on_suprimir(self, mapeamento_id):
+        """Suprime mapeamento — exclusão definitiva (soft delete)."""
+        reply = QMessageBox.warning(
+            self,
+            "Suprimir mapeamento",
+            f"Esta ação suprimirá permanentemente o mapeamento #{mapeamento_id} "
+            "e todos os seus dados associados.\n\n"
+            "Esta operação é irreversível. Deseja continuar?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        self._controller.suprimir_mapeamento(mapeamento_id)
+
     def _on_parecer_emitido(self, data):
-        """Parecer emitido — recarrega lista."""
         self._load_data()
+
+    def _on_mapeamento_suprimido(self, data):
+        self._load_data()
+
+    # ================================================================
+    # Loading / Error
+    # ================================================================
 
     def _on_loading_changed(self, operation, is_loading):
         if operation == "catalogo_homologacao":
@@ -260,13 +527,13 @@ class HomologacaoTab(QWidget):
                 self._status_label.setVisible(True)
             else:
                 self._status_label.setVisible(False)
-        elif operation == "download":
-            for row in range(self._table.rowCount()):
-                widget = self._table.cellWidget(row, 7)
-                if widget:
-                    for btn in widget.findChildren(QPushButton):
-                        if btn.text() == "Baixar":
-                            btn.setEnabled(not is_loading)
+        elif operation.startswith("download:"):
+            target_zonal_id = int(operation.split(":", 1)[1])
+            for row in range(self._card_list.count()):
+                widget = self._card_list.itemWidget(self._card_list.item(row))
+                if widget and hasattr(widget, "_zonal_id") and widget._zonal_id == target_zonal_id:
+                    widget._download_btn.setEnabled(not is_loading)
+                    break
 
     def _on_error(self, operation, message):
         if operation in ("catalogo_homologacao", "parecer"):
@@ -276,7 +543,7 @@ class HomologacaoTab(QWidget):
 
     @staticmethod
     def _format_metodo(metodo_apply):
-        """Converte metodoApply em label legivel."""
+        """Converte metodoApply em label legível."""
         labels = {
             "METODO_1": "Método 1",
             "METODO_2_DISCRETO": "Método 2a (Discreto)",

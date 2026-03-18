@@ -1,6 +1,7 @@
 """Controller de mapeamentos — catalogo zonal, download, upload V2."""
 
 import json
+from urllib.parse import quote
 
 from qgis.PyQt.QtCore import QObject, QTimer, pyqtSignal
 from qgis.core import QgsApplication, QgsVectorLayer, QgsMessageLog, Qgis
@@ -14,8 +15,10 @@ class MapeamentoController(QObject):
     """Orquestra operacoes de mapeamento V2 (zonal)."""
 
     # Signals V2 (zonal)
-    zonal_download_completed = pyqtSignal(str, int)  # gpkg_path, zonal_id
+    zonal_download_completed = pyqtSignal(str, int, object)  # gpkg_path, zonal_id, catalogo_meta
     zonal_upload_completed = pyqtSignal(str, int)    # gpkg_path, zonal_id
+    versions_loaded = pyqtSignal(int, dict)          # zonal_id, versions_data
+    compare_fgb_ready = pyqtSignal(int, str, bytes)  # zonal_id, batch_uuid, fgb_bytes
     upload_progress = pyqtSignal(dict)               # UploadBatchStatus dict
     conflict_detected = pyqtSignal(str)              # batchUuid
     conflict_data_ready = pyqtSignal(str, bytes)     # batchUuid, response body
@@ -40,6 +43,10 @@ class MapeamentoController(QObject):
         self._pending_conflict_fetch_uuid = None
         self._pending_conflict_resolve_id = None
         self._pending_conflict_resolve_uuid = None
+        self._pending_upload_history_id = None
+        self._pending_suprimir_id = None
+        self._pending_versions_ids = {}   # request_id -> zonal_id
+        self._pending_compare_ids = {}    # request_id -> (zonal_id, batch_uuid)
         self._active_tasks = []
         self._pending_edit_fids = {}
 
@@ -60,12 +67,22 @@ class MapeamentoController(QObject):
     # Catalogo Zonal (V2)
     # ----------------------------------------------------------------
 
-    def load_catalogo(self):
-        """Carrega catalogo de zonais consolidados/concluidos."""
+    def load_catalogo(self, page=1, size=20, status="CONSOLIDATED", metodo="",
+                      mapeamento_id="", author="", descricao=""):
+        """Carrega catalogo de zonais com paginação e filtros server-side."""
         if not self._state.is_authenticated:
             return
 
-        url = self._api_url("/zonal/catalogo?status=CONSOLIDATED")
+        params = f"status={status}&page={page}&size={size}"
+        if mapeamento_id:
+            params += f"&mapeamentoId={quote(mapeamento_id)}"
+        if author:
+            params += f"&author={quote(author)}"
+        if descricao:
+            params += f"&descricao={quote(descricao)}"
+        if metodo:
+            params += f"&metodo={quote(metodo)}"
+        url = self._api_url(f"/zonal/catalogo?{params}")
         self._state.set_loading("catalogo", True)
         self._pending_catalogo_id = self._http.get(url)
 
@@ -73,14 +90,53 @@ class MapeamentoController(QObject):
     # Request handlers
     # ----------------------------------------------------------------
 
-    def load_catalogo_homologacao(self, status_filter="AGUARDANDO"):
-        """Carrega catalogo de zonais para homologacao."""
+    def load_catalogo_homologacao(self, status_filter="AGUARDANDO",
+                                  mapeamento_id="", author="", descricao="",
+                                  page=1, size=20):
+        """Carrega catalogo de zonais para homologação com filtros e paginação."""
         if not self._state.is_authenticated:
             return
 
-        url = self._api_url(f"/zonal/catalogo?status={status_filter}")
+        params = f"status={status_filter}&page={page}&size={size}"
+        if mapeamento_id:
+            params += f"&mapeamentoId={quote(mapeamento_id)}"
+        if author:
+            params += f"&author={quote(author)}"
+        if descricao:
+            params += f"&descricao={quote(descricao)}"
+        url = self._api_url(f"/zonal/catalogo?{params}")
         self._state.set_loading("catalogo_homologacao", True)
         self._pending_catalogo_homologacao_id = self._http.get(url)
+
+    def load_upload_history(self, page=1, size=20, status="", mapeamento_id=""):
+        """Carrega histórico de uploads com paginação server-side."""
+        if not self._state.is_authenticated:
+            return
+
+        params = f"page={page}&size={size}"
+        if status:
+            params += f"&status={quote(status)}"
+        if mapeamento_id:
+            params += f"&mapeamentoId={quote(mapeamento_id)}"
+        url = self._api_url(f"/zonal/upload/history?{params}")
+        self._state.set_loading("upload_history", True)
+        self._pending_upload_history_id = self._http.get(url)
+
+    def load_versions(self, zonal_id):
+        """Busca versões disponíveis para comparação de um zonal."""
+        if not self._state.is_authenticated:
+            return
+        url = self._api_url(f"/zonal/{zonal_id}/versions")
+        req_id = self._http.get(url)
+        self._pending_versions_ids[req_id] = zonal_id
+
+    def download_compare_fgb(self, zonal_id, batch_uuid):
+        """Baixa FlatGeobuf de uma versão específica para comparação."""
+        if not self._state.is_authenticated:
+            return
+        url = self._api_url(f"/zonal/{zonal_id}/compare?batchUuid={quote(str(batch_uuid))}")
+        req_id = self._http.get(url)
+        self._pending_compare_ids[req_id] = (zonal_id, batch_uuid)
 
     def emitir_parecer(self, zonal_id, decisao, motivo=""):
         """Emite parecer de homologacao (aprovar/reprovar/cancelar)."""
@@ -101,6 +157,21 @@ class MapeamentoController(QObject):
         }).encode("utf-8")
         self._state.set_loading("parecer", True)
         self._pending_parecer_id = self._http.post_json(url, payload)
+
+    def suprimir_mapeamento(self, mapeamento_id):
+        """Suprime mapeamento (DELETE /api/mapeamento/delete/:id?force=true)."""
+        if not self._state.is_authenticated:
+            self._state.set_error("suprimir", "Nao autenticado")
+            return
+
+        user = self._state.user
+        if not user or not user.is_homologador:
+            self._state.set_error("suprimir", "Permissao negada: role 'homologar' requerida")
+            return
+
+        url = self._api_url(f"/mapeamento/delete/{mapeamento_id}?force=true")
+        self._state.set_loading("suprimir", True)
+        self._pending_suprimir_id = self._http.delete(url)
 
     def encerrar_mapeamento(self, mapeamento_id):
         """Encerra mapeamento (POST /api/mapeamento/:id/encerrar)."""
@@ -146,12 +217,15 @@ class MapeamentoController(QObject):
                 data = json.loads(body)
                 if isinstance(data, list):
                     items_raw = data
+                    pagination = {}
                 else:
                     items_raw = data.get("data") or data.get("content") or []
+                    pagination = data.get("pagination") or {}
                 items = [CatalogoItem.from_dict(item) for item in items_raw]
-                self._state.catalogo_items = items
+                self._state.catalogo_items = (items, pagination)
                 QgsMessageLog.logMessage(
-                    f"[Catalogo] {len(items)} zonais carregados",
+                    f"[Catalogo] {len(items)} zonais carregados"
+                    f" (pag {pagination.get('page', '?')}/{pagination.get('totalPages', '?')})",
                     PLUGIN_NAME, Qgis.Info,
                 )
             except Exception as e:
@@ -169,12 +243,15 @@ class MapeamentoController(QObject):
                 data = json.loads(body)
                 if isinstance(data, list):
                     items_raw = data
+                    pagination = {}
                 else:
                     items_raw = data.get("data") or data.get("content") or []
+                    pagination = data.get("pagination") or {}
                 items = [CatalogoItem.from_dict(item) for item in items_raw]
-                self._state.catalogo_homologacao_changed.emit(items)
+                self._state.catalogo_homologacao_changed.emit(items, pagination)
                 QgsMessageLog.logMessage(
-                    f"[Homologacao] {len(items)} zonais carregados",
+                    f"[Homologacao] {len(items)} zonais carregados"
+                    f" (pag {pagination.get('page', '?')}/{pagination.get('totalPages', '?')})",
                     PLUGIN_NAME, Qgis.Info,
                 )
             except Exception as e:
@@ -200,13 +277,29 @@ class MapeamentoController(QObject):
         elif request_id == self._pending_raster_id:
             self._pending_raster_id = None
             try:
-                from ...domain.services.raster_service import build_raster_configs
+                from ...domain.services.raster_service import build_raster_hierarchy
                 data = json.loads(body)
                 metodo = self._pending_raster_meta.get("metodo_apply", "")
-                configs = build_raster_configs(data, metodo)
-                self._state.raster_layers_ready.emit(configs)
+
+                # Diagnostico: loga estrutura do primeiro tile
+                if isinstance(data, list) and data:
+                    sample = data[0]
+                    keys = sorted(sample.keys()) if isinstance(sample, dict) else "N/A"
+                    QgsMessageLog.logMessage(
+                        f"[Raster] tilesMetodos: {len(data)} tiles, "
+                        f"metodo={metodo}, keys={keys}",
+                        PLUGIN_NAME, Qgis.Info,
+                    )
+
+                hierarchy = build_raster_hierarchy(data, metodo)
+                self._state.raster_layers_ready.emit(hierarchy)
+                total = sum(
+                    len(bg.layers)
+                    for dg in hierarchy.dates
+                    for bg in dg.bands
+                )
                 QgsMessageLog.logMessage(
-                    f"[Raster] {len(configs)} camadas prontas",
+                    f"[Raster] {total} camadas em {len(hierarchy.dates)} datas",
                     PLUGIN_NAME, Qgis.Info,
                 )
             except Exception as e:
@@ -230,6 +323,56 @@ class MapeamentoController(QObject):
                 PLUGIN_NAME, Qgis.Info,
             )
             self.conflict_resolved.emit(batch_uuid)
+
+        elif request_id == self._pending_upload_history_id:
+            self._pending_upload_history_id = None
+            self._state.set_loading("upload_history", False)
+            try:
+                from ...domain.models.upload_batch import UploadHistoryItem
+                data = json.loads(body)
+                items_raw = data.get("data") or []
+                pagination = data.get("pagination") or {}
+                items = [UploadHistoryItem.from_dict(item) for item in items_raw]
+                self._state.upload_history_changed.emit(items, pagination)
+                QgsMessageLog.logMessage(
+                    f"[UploadHistory] {len(items)} batches carregados",
+                    PLUGIN_NAME, Qgis.Info,
+                )
+            except Exception as e:
+                QgsMessageLog.logMessage(
+                    f"Erro ao parsear historico de uploads: {e}",
+                    PLUGIN_NAME, Qgis.Warning,
+                )
+                self._state.set_error("upload_history", str(e))
+
+        elif request_id == self._pending_suprimir_id:
+            self._pending_suprimir_id = None
+            self._state.set_loading("suprimir", False)
+            try:
+                data = json.loads(body)
+                self._state.mapeamento_suprimido.emit(data)
+                QgsMessageLog.logMessage(
+                    f"[Suprimir] Mapeamento suprimido: {data}",
+                    PLUGIN_NAME, Qgis.Info,
+                )
+            except Exception as e:
+                self._state.set_error("suprimir", str(e))
+
+        elif request_id in self._pending_versions_ids:
+            zonal_id = self._pending_versions_ids.pop(request_id)
+            try:
+                data = json.loads(body)
+                self.versions_loaded.emit(zonal_id, data)
+            except Exception as e:
+                QgsMessageLog.logMessage(
+                    f"Erro ao parsear versoes: {e}",
+                    PLUGIN_NAME, Qgis.Warning,
+                )
+
+        elif request_id in self._pending_compare_ids:
+            zonal_id, batch_uuid = self._pending_compare_ids.pop(request_id)
+            # body é bytes (FlatGeobuf binário)
+            self.compare_fgb_ready.emit(zonal_id, batch_uuid, body)
 
     def _on_request_error(self, request_id, error_msg):
         if request_id == self._pending_catalogo_id:
@@ -258,6 +401,20 @@ class MapeamentoController(QObject):
             self._pending_conflict_resolve_id = None
             self._pending_conflict_resolve_uuid = None
             self._state.set_error("upload", f"Erro ao resolver conflitos: {error_msg}")
+        elif request_id == self._pending_suprimir_id:
+            self._pending_suprimir_id = None
+            self._state.set_loading("suprimir", False)
+            self._state.set_error("suprimir", error_msg)
+        elif request_id == self._pending_upload_history_id:
+            self._pending_upload_history_id = None
+            self._state.set_loading("upload_history", False)
+            self._state.set_error("upload_history", error_msg)
+        elif request_id in self._pending_versions_ids:
+            self._pending_versions_ids.pop(request_id)
+            self._state.set_error("compare", f"Erro ao buscar versões: {error_msg}")
+        elif request_id in self._pending_compare_ids:
+            self._pending_compare_ids.pop(request_id)
+            self._state.set_error("compare", f"Erro ao baixar versão: {error_msg}")
 
     # ----------------------------------------------------------------
     # Download Zonal (V2)
@@ -290,6 +447,7 @@ class MapeamentoController(QObject):
                 "dataReferencia": catalogo_item.data_referencia,
                 "descricao": catalogo_item.descricao,
                 "jobId": catalogo_item.job_id,
+                "metodoApply": catalogo_item.metodo_apply,
             }
 
         task = DownloadZonalTask(
@@ -303,7 +461,7 @@ class MapeamentoController(QObject):
 
         task.signals.completed.connect(
             lambda success, msg: self._on_zonal_download_completed(
-                success, msg, output_path, zonal_id
+                success, msg, output_path, zonal_id, catalogo_meta
             )
         )
         task.signals.status_message.connect(
@@ -311,19 +469,20 @@ class MapeamentoController(QObject):
         )
 
         self._active_tasks.append(task)
-        self._state.set_loading("download", True)
+        self._state.set_loading(f"download:{zonal_id}", True)
         QgsApplication.taskManager().addTask(task)
 
-    def _on_zonal_download_completed(self, success, message, gpkg_path, zonal_id):
+    def _on_zonal_download_completed(self, success, message, gpkg_path, zonal_id,
+                                     catalogo_meta=None):
         self._cleanup_finished_tasks()
-        self._state.set_loading("download", False)
+        self._state.set_loading(f"download:{zonal_id}", False)
         if success:
-            self.zonal_download_completed.emit(gpkg_path, zonal_id)
+            self.zonal_download_completed.emit(gpkg_path, zonal_id, catalogo_meta or {})
             QgsMessageLog.logMessage(
                 f"Download zonal concluido: {gpkg_path}", PLUGIN_NAME, Qgis.Info,
             )
         else:
-            self._state.set_error("download", message)
+            self._state.set_error(f"download:{zonal_id}", message)
             QgsMessageLog.logMessage(
                 f"Download zonal falhou: {message}", PLUGIN_NAME, Qgis.Warning,
             )

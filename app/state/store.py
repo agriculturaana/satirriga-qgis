@@ -10,17 +10,19 @@ class AppState(QObject):
     session_countdown = pyqtSignal(int)              # segundos restantes
 
     # Catalogo zonal
-    catalogo_changed = pyqtSignal(list)              # List[CatalogoItem]
+    catalogo_changed = pyqtSignal(list, dict)        # List[CatalogoItem], pagination dict
+    upload_history_changed = pyqtSignal(list, dict)  # List[UploadHistoryItem], pagination dict
     upload_progress_changed = pyqtSignal(dict)       # UploadBatchStatus dict
     conflict_detected = pyqtSignal(str)              # batchUuid
     upload_batch_completed = pyqtSignal(str, dict)   # batchUuid, summary
 
     # Raster
-    raster_layers_ready = pyqtSignal(list)            # List[RasterLayerConfig]
+    raster_layers_ready = pyqtSignal(object)           # RasterHierarchy
 
     # Homologacao
-    catalogo_homologacao_changed = pyqtSignal(list)   # List[CatalogoItem]
+    catalogo_homologacao_changed = pyqtSignal(list, dict)  # List[CatalogoItem], pagination dict
     parecer_emitido = pyqtSignal(dict)                # {parecerId, status, message}
+    mapeamento_suprimido = pyqtSignal(dict)           # response data do DELETE
 
     # UI feedback
     loading_changed = pyqtSignal(str, bool)          # (operation, is_loading)
@@ -57,8 +59,13 @@ class AppState(QObject):
 
     @catalogo_items.setter
     def catalogo_items(self, value):
-        self._catalogo_items = value
-        self.catalogo_changed.emit(value)
+        """Aceita list ou tuple(list, dict) para suportar paginação."""
+        if isinstance(value, tuple) and len(value) == 2:
+            self._catalogo_items, pagination = value
+            self.catalogo_changed.emit(self._catalogo_items, pagination)
+        else:
+            self._catalogo_items = value
+            self.catalogo_changed.emit(value, {})
 
     def set_loading(self, operation, is_loading):
         self.loading_changed.emit(operation, is_loading)

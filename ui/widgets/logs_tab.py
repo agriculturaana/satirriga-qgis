@@ -8,6 +8,7 @@ from qgis.PyQt.QtWidgets import (
 from qgis.core import QgsApplication, QgsMessageLog
 
 from ...infra.config.settings import PLUGIN_NAME
+from ..theme import SectionHeader
 
 
 class LogsTab(QWidget):
@@ -26,14 +27,11 @@ class LogsTab(QWidget):
         layout.setSpacing(4)
 
         # Header
-        header = QHBoxLayout()
-        header.addWidget(QLabel("Logs do plugin"))
-        header.addStretch()
-
+        section_header = SectionHeader("Logs", "plugin")
         self._line_count = QLabel("0 linhas")
-        self._line_count.setStyleSheet("font-size: 10px; color: #757575;")
-        header.addWidget(self._line_count)
-        layout.addLayout(header)
+        self._line_count.setStyleSheet("font-size: 10px; color: #757575; border: none; background: transparent;")
+        section_header.add_widget(self._line_count)
+        layout.addWidget(section_header)
 
         # Text area
         self._text = QPlainTextEdit()

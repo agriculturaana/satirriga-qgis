@@ -41,7 +41,7 @@ class FakeAppState:
         self.auth_state_changed = MockSignal(bool)
         self.user_changed = MockSignal(object)
         self.session_countdown = MockSignal(int)
-        self.catalogo_changed = MockSignal(list)
+        self.catalogo_changed = MockSignal(list, dict)
         self.upload_progress_changed = MockSignal(dict)
         self.conflict_detected = MockSignal(str)
         self.upload_batch_completed = MockSignal(str, dict)
@@ -77,8 +77,12 @@ class FakeAppState:
 
     @catalogo_items.setter
     def catalogo_items(self, value):
-        self._catalogo_items = value
-        self.catalogo_changed.emit(value)
+        if isinstance(value, tuple) and len(value) == 2:
+            self._catalogo_items, pagination = value
+            self.catalogo_changed.emit(self._catalogo_items, pagination)
+        else:
+            self._catalogo_items = value
+            self.catalogo_changed.emit(value, {})
 
     def set_loading(self, operation, is_loading):
         self.loading_changed.emit(operation, is_loading)
@@ -170,7 +174,15 @@ class TestCatalogoState:
         self.state.catalogo_items = items
         assert self.state.catalogo_items == items
         assert self.state.catalogo_changed.call_count == 1
-        assert self.state.catalogo_changed.last_args == (items,)
+        assert self.state.catalogo_changed.last_args == (items, {})
+
+    def test_set_catalogo_items_with_pagination(self):
+        items = [{"id": 1}]
+        pagination = {"page": 1, "size": 20, "total": 1, "totalPages": 1}
+        self.state.catalogo_items = (items, pagination)
+        assert self.state.catalogo_items == items
+        assert self.state.catalogo_changed.call_count == 1
+        assert self.state.catalogo_changed.last_args == (items, pagination)
 
     def test_set_empty_catalogo(self):
         self.state.catalogo_items = []

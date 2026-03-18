@@ -47,15 +47,15 @@ class SessionHeader(QWidget):
         self._user_btn.setCursor(Qt.PointingHandCursor)
         self._user_btn.setStyleSheet(
             "QPushButton { background: transparent; border: none; "
-            "font-size: 11px; font-weight: bold; padding: 2px 4px; }"
-            "QPushButton:hover { color: #1976D2; }"
+            "font-size: 11px; font-weight: bold; color: #ECEFF1; padding: 2px 4px; }"
+            "QPushButton:hover { color: #64B5F6; }"
         )
         self._user_btn.clicked.connect(self._on_user_clicked)
         layout.addWidget(self._user_btn)
 
         # Countdown label
         self._countdown_label = QLabel()
-        self._countdown_label.setStyleSheet("font-size: 10px; border: none;")
+        self._countdown_label.setStyleSheet("font-size: 10px; color: #B0BEC5; border: none;")
         layout.addWidget(self._countdown_label)
 
         self.setLayout(layout)
@@ -88,11 +88,11 @@ class SessionHeader(QWidget):
         self._countdown_label.setText(f"[{mins}:{secs:02d}]")
 
         if seconds < 60:
-            self._countdown_label.setStyleSheet("font-size: 10px; color: #F44336; border: none;")
+            self._countdown_label.setStyleSheet("font-size: 10px; color: #EF9A9A; border: none;")
         elif seconds < 300:
-            self._countdown_label.setStyleSheet("font-size: 10px; color: #FF9800; border: none;")
+            self._countdown_label.setStyleSheet("font-size: 10px; color: #FFE082; border: none;")
         else:
-            self._countdown_label.setStyleSheet("font-size: 10px; border: none;")
+            self._countdown_label.setStyleSheet("font-size: 10px; color: #B0BEC5; border: none;")
 
     def _on_loading(self, operation, is_loading):
         if operation == "auth":

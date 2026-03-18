@@ -68,6 +68,9 @@ class CatalogoItem:
     metodo_apply: Optional[str] = None
     author: Optional[str] = None
     job_id: Optional[str] = None
+    mascara_nome: Optional[str] = None
+    homologado_at: Optional[str] = None
+    homologador_nome: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "CatalogoItem":
@@ -84,4 +87,7 @@ class CatalogoItem:
             metodo_apply=data.get("metodoApply"),
             author=data.get("author"),
             job_id=data.get("jobId"),
+            mascara_nome=data.get("mascaraNome"),
+            homologado_at=data.get("homologadoAt"),
+            homologador_nome=data.get("homologadorNome"),
         )

@@ -1,7 +1,7 @@
 import os
 
 from qgis.PyQt.QtCore import pyqtSignal, Qt
-from qgis.PyQt.QtGui import QPixmap
+from qgis.PyQt.QtGui import QPixmap, QPainter, QColor, QLinearGradient
 from qgis.PyQt.QtWidgets import (
     QDockWidget, QVBoxLayout, QHBoxLayout, QWidget,
     QStackedWidget, QLabel,
@@ -24,8 +24,9 @@ class SatIrrigaDock(QDockWidget):
     PAGE_MAPEAMENTOS = 1
     PAGE_CAMADAS = 2
     PAGE_HOMOLOGACAO = 3
-    PAGE_CONFIG = 4
-    PAGE_LOGS = 5
+    PAGE_HISTORICO = 4
+    PAGE_CONFIG = 5
+    PAGE_LOGS = 6
 
     def __init__(self, state, config_repo, parent=None):
         super().__init__(parent)
@@ -44,12 +45,11 @@ class SatIrrigaDock(QDockWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Header
-        header_widget = QWidget()
-        header_widget.setStyleSheet("border-bottom: 1px solid palette(mid);")
+        # Header com gradiente escuro (tons da logo SatIrriga)
+        header_widget = _GradientHeader()
         self._header = self._build_header()
         header_widget.setLayout(self._header)
-        header_widget.setFixedHeight(44)
+        header_widget.setFixedHeight(48)
         main_layout.addWidget(header_widget)
 
         # Content: ActivityBar + QStackedWidget
@@ -64,11 +64,22 @@ class SatIrrigaDock(QDockWidget):
 
         # Pages
         self._pages = QStackedWidget()
-        self._pages.setStyleSheet("")
+        self._pages.setObjectName("satirriga_pages")
+        self._pages.setStyleSheet(
+            "QStackedWidget#satirriga_pages {"
+            "  background: qlineargradient("
+            "    x1:0, y1:0, x2:0.3, y2:1,"
+            "    stop:0 rgba(25, 118, 210, 18),"
+            "    stop:0.5 rgba(66, 165, 245, 10),"
+            "    stop:1 rgba(13, 71, 161, 14)"
+            "  );"
+            "}"
+        )
 
         # Placeholders (serao substituidos via set_page_widget)
         for label_text in ("Home", "Catálogo Zonal (requer login)", "Camadas locais",
-                           "Homologação (requer permissão)", "Configurações", "Logs"):
+                           "Homologação (requer permissão)", "Histórico de envios",
+                           "Configurações", "Logs"):
             placeholder = QLabel(label_text)
             placeholder.setAlignment(Qt.AlignCenter)
             placeholder.setStyleSheet("font-size: 12px;")
@@ -105,7 +116,7 @@ class SatIrrigaDock(QDockWidget):
 
         # Title
         title = QLabel(f"SatIrriga v{PLUGIN_VERSION}")
-        title.setStyleSheet("font-size: 13px; font-weight: bold; border: none;")
+        title.setStyleSheet("font-size: 13px; font-weight: bold; color: #ECEFF1; border: none;")
         header.addWidget(title)
 
         # Environment chip
@@ -124,7 +135,7 @@ class SatIrrigaDock(QDockWidget):
 
         # User area (sera substituido pelo SessionHeader via plugin.py)
         self._user_label = QLabel("Não autenticado")
-        self._user_label.setStyleSheet("font-size: 11px; border: none;")
+        self._user_label.setStyleSheet("font-size: 11px; color: #B0BEC5; border: none;")
         header.addWidget(self._user_label)
 
         return header
@@ -132,13 +143,14 @@ class SatIrrigaDock(QDockWidget):
     def _setup_nav_buttons(self):
         """Cria botoes de navegacao na Activity Bar."""
         self._activity_bar.add_button("nav_home", "Tela inicial", self.PAGE_HOME)
-        self._activity_bar.add_button("nav_mapeamentos", "Catálogo de resultados zonais", self.PAGE_MAPEAMENTOS)
-        self._activity_bar.add_button("nav_camadas", "Camadas locais com status de sincronização", self.PAGE_CAMADAS)
+        self._activity_bar.add_button("nav_mapeamentos", "Mapeamentos disponíveis para edição", self.PAGE_MAPEAMENTOS)
+        self._activity_bar.add_button("nav_camadas", "Camadas locais (GeoPackage)", self.PAGE_CAMADAS)
         # Homologacao — oculto por padrao, visivel para homologadores
         self._homologacao_btn = self._activity_bar.add_button(
             "nav_homologacao", "Homologação de mapeamentos", self.PAGE_HOMOLOGACAO,
         )
         self._homologacao_btn.setVisible(False)
+        self._activity_bar.add_button("nav_historico", "Histórico de envios", self.PAGE_HISTORICO)
         self._activity_bar.add_stretch()
         self._activity_bar.add_button("nav_config", "Configurações do plugin", self.PAGE_CONFIG)
         self._activity_bar.add_button("nav_logs", "Logs de operações", self.PAGE_LOGS)
@@ -192,3 +204,22 @@ class SatIrrigaDock(QDockWidget):
     def closeEvent(self, event):
         self.closed.emit()
         event.accept()
+
+
+class _GradientHeader(QWidget):
+    """Header com gradiente horizontal — tons escuros da logo SatIrriga."""
+
+    _GRAD_LEFT = QColor("#163D64")
+    _GRAD_RIGHT = QColor("#1E5A8E")
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        grad = QLinearGradient(0, 0, self.width(), 0)
+        grad.setColorAt(0.0, self._GRAD_LEFT)
+        grad.setColorAt(1.0, self._GRAD_RIGHT)
+        painter.fillRect(self.rect(), grad)
+
+        # Linha inferior sutil
+        painter.setPen(QColor(255, 255, 255, 25))
+        painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
+        painter.end()

@@ -1,18 +1,25 @@
-"""Aba de camadas locais — lista GPKGs V2, sync status, acoes."""
+"""Aba de camadas locais — cards de GPKGs V2, sync status, ações."""
 
 import os
+from datetime import datetime
 
-from qgis.PyQt.QtCore import Qt
-from qgis.PyQt.QtGui import QColor
+from qgis.PyQt.QtCore import Qt, QSize
+from qgis.PyQt.QtGui import QColor, QIcon
 from qgis.PyQt.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QMessageBox,
+    QListWidget, QListWidgetItem, QSizePolicy, QMessageBox,
+    QGraphicsDropShadowEffect, QComboBox, QToolButton,
 )
 from qgis.core import QgsProject, QgsVectorLayer, QgsMessageLog, Qgis
 
 from ...domain.models.enums import SyncStatusEnum
 from ...infra.config.settings import PLUGIN_NAME
+from ..theme import SectionHeader
+
+_ICONS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "assets", "icons",
+)
 from .upload_progress_widget import UploadProgressWidget
 
 
@@ -26,7 +33,7 @@ _SYNC_COLORS = {
 
 
 class CamadasTab(QWidget):
-    """Lista GPKGs locais com status de sync e acoes."""
+    """Lista GPKGs locais com status de sync e ações — layout em cards."""
 
     def __init__(self, state, mapeamento_controller, parent=None):
         super().__init__(parent)
@@ -44,34 +51,51 @@ class CamadasTab(QWidget):
         layout.setSpacing(4)
 
         # Header
-        header = QHBoxLayout()
-        header.addWidget(QLabel("Camadas locais (GeoPackage)"))
-        header.addStretch()
+        section_header = SectionHeader("Camadas locais", "GeoPackage")
         self._refresh_btn = QPushButton("Atualizar")
         self._refresh_btn.setFixedWidth(80)
         self._refresh_btn.setToolTip("Atualizar lista de camadas locais")
         self._refresh_btn.clicked.connect(self._refresh_list)
-        header.addWidget(self._refresh_btn)
-        layout.addLayout(header)
+        section_header.add_widget(self._refresh_btn)
+        layout.addWidget(section_header)
 
-        # Tabela — 6 colunas
-        self._table = QTableWidget()
-        self._table.setColumnCount(6)
-        self._table.setHorizontalHeaderLabels([
-            "#ID", "Data Ref.", "Descrição", "Status Sinc.", "Tamanho", "Ações",
-        ])
-        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self._table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        self._table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self._table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self._table.verticalHeader().setVisible(False)
-        self._table.setSortingEnabled(True)
-        layout.addWidget(self._table)
+        # Barra de ordenação
+        sort_row = QHBoxLayout()
+        sort_row.setSpacing(4)
+
+        sort_label = QLabel("Ordenar:")
+        sort_label.setStyleSheet("font-size: 11px; color: #757575;")
+        sort_row.addWidget(sort_label)
+
+        self._sort_combo = QComboBox()
+        for opt in ("#ID", "Data", "Descrição", "Tamanho", "Status"):
+            self._sort_combo.addItem(opt)
+        self._sort_combo.setCurrentIndex(0)
+        self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
+        sort_row.addWidget(self._sort_combo, 1)
+
+        self._sort_toggle = QToolButton()
+        self._sort_toggle.setText("▲")
+        self._sort_toggle.setFixedWidth(28)
+        self._sort_toggle.setToolTip("Alternar ascendente/descendente")
+        self._sort_toggle.setCheckable(True)
+        self._sort_toggle.toggled.connect(self._on_sort_toggled)
+        sort_row.addWidget(self._sort_toggle)
+
+        layout.addLayout(sort_row)
+
+        # Lista de cards
+        self._card_list = QListWidget()
+        self._card_list.setSelectionMode(QListWidget.NoSelection)
+        self._card_list.setFocusPolicy(Qt.NoFocus)
+        self._card_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._card_list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        self._card_list.setSpacing(4)
+        self._card_list.setStyleSheet(
+            "QListWidget { border: none; background: transparent; }"
+            "QListWidget::item { border: none; background: transparent; }"
+        )
+        layout.addWidget(self._card_list, 1)
 
         # Upload progress widget (inicialmente hidden)
         self._upload_progress = UploadProgressWidget()
@@ -96,16 +120,181 @@ class CamadasTab(QWidget):
         )
         self._controller.edit_tracking_done.connect(self._refresh_list)
 
+    # ================================================================
+    # Card factory
+    # ================================================================
+
+    def _create_card(self, gpkg_info, counts):
+        """Cria widget de card para um GPKG local."""
+        card = QWidget()
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setStyleSheet(
+            "QWidget#satirriga_card { border: 1px solid palette(mid); border-radius: 6px;"
+            " padding: 6px; background: palette(base); }"
+        )
+        card.setObjectName("satirriga_card")
+
+        shadow = QGraphicsDropShadowEffect(card)
+        shadow.setBlurRadius(8)
+        shadow.setOffset(0, 2)
+        shadow.setColor(QColor(0, 0, 0, 40))
+        card.setGraphicsEffect(shadow)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(3)
+
+        zonal_id = gpkg_info.get("zonal_id")
+        path = gpkg_info.get("path", "")
+        mid = gpkg_info.get("mapeamento_id")
+
+        # --- Linha 1: #ID + sync badge + ações ---
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
+
+        id_text = f"<b>#{mid}</b>" if mid else f"<b>Zonal {zonal_id or '?'}</b>"
+        id_label = QLabel(id_text)
+        id_label.setStyleSheet("font-size: 13px;")
+        row1.addWidget(id_label)
+
+        # Sync status badge
+        sync_text, sync_color = self._format_sync_status(counts)
+        badge = QLabel(sync_text)
+        badge.setStyleSheet(
+            f"background-color: {sync_color}; color: white;"
+            " border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: bold;"
+        )
+        badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        row1.addWidget(badge)
+
+        row1.addStretch()
+
+        # Tamanho
+        size_mb = gpkg_info.get("size_mb", 0)
+        size_label = QLabel(f"{size_mb} MB")
+        size_label.setStyleSheet("font-size: 10px; color: #757575;")
+        row1.addWidget(size_label)
+
+        layout.addLayout(row1)
+
+        # --- Linha 2: data + descrição ---
+        data_ref = "—"
+        raw_date = gpkg_info.get("data_referencia")
+        if raw_date:
+            try:
+                dt = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+                data_ref = dt.strftime("%d/%m/%Y")
+            except (ValueError, AttributeError):
+                data_ref = str(raw_date)[:10]
+
+        descricao = gpkg_info.get("descricao") or f"Zonal {zonal_id or '?'}"
+        meta = QLabel(f"{data_ref}  ·  {descricao}")
+        meta.setStyleSheet("font-size: 11px; color: #757575;")
+        meta.setWordWrap(True)
+        layout.addWidget(meta)
+
+        # --- Linha 3: ações ---
+        row3 = QHBoxLayout()
+        row3.setSpacing(4)
+        row3.addStretch()
+
+        modified = counts.get("MODIFIED", 0)
+        new = counts.get("NEW", 0)
+        has_changes = modified > 0 or new > 0
+
+        # Abrir
+        btn_open = QPushButton("Abrir")
+        btn_open.setFixedWidth(50)
+        btn_open.setToolTip("Abrir GeoPackage como camada editável no QGIS")
+        btn_open.setStyleSheet(
+            "QPushButton { background-color: #1976D2; color: white;"
+            " border: none; padding: 3px 8px; border-radius: 3px; font-size: 11px; }"
+            "QPushButton:hover { background-color: #1565C0; }"
+        )
+        btn_open.clicked.connect(
+            lambda _, p=path, zid=zonal_id: self._open_gpkg(p, zid)
+        )
+        row3.addWidget(btn_open)
+
+        # Enviar
+        btn_upload = QPushButton("Enviar")
+        btn_upload.setFixedWidth(50)
+        if has_changes:
+            btn_upload.setEnabled(True)
+            btn_upload.setStyleSheet(
+                "QPushButton { background-color: #FF9800; color: white;"
+                " border: none; padding: 3px 8px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #F57C00; }"
+            )
+            btn_upload.setToolTip(f"{modified + new} feature(s) para enviar")
+            btn_upload.clicked.connect(
+                lambda _, p=path: self._upload_gpkg(p)
+            )
+        else:
+            btn_upload.setEnabled(False)
+            btn_upload.setStyleSheet(
+                "QPushButton { background-color: #E0E0E0; color: #9E9E9E;"
+                " border: none; padding: 3px 8px; border-radius: 3px; font-size: 11px; }"
+            )
+            btn_upload.setToolTip("Sem alterações para enviar")
+        row3.addWidget(btn_upload)
+
+        # Remover
+        btn_remove = QPushButton()
+        btn_remove.setIcon(QIcon(os.path.join(_ICONS_DIR, "action_remove.svg")))
+        btn_remove.setFixedWidth(28)
+        btn_remove.setStyleSheet(
+            "QPushButton { background-color: #F44336; color: white;"
+            " border: none; padding: 3px; border-radius: 3px; font-size: 11px; }"
+            "QPushButton:hover { background-color: #D32F2F; }"
+        )
+        btn_remove.setToolTip("Remover GeoPackage local")
+        btn_remove.clicked.connect(
+            lambda _, p=path, mod=modified + new: self._remove_gpkg(p, mod)
+        )
+        row3.addWidget(btn_remove)
+
+        layout.addLayout(row3)
+
+        card.setLayout(layout)
+        card._action_buttons = [btn_open, btn_upload]
+        return card
+
+    @staticmethod
+    def _format_sync_status(counts):
+        """Retorna (texto, cor) para o badge de sync status."""
+        modified = counts.get("MODIFIED", 0)
+        new = counts.get("NEW", 0)
+        uploaded = counts.get("UPLOADED", 0)
+        downloaded = counts.get("DOWNLOADED", 0)
+        total = counts.get("total", 0)
+
+        if new > 0 and modified > 0:
+            return f"{modified} editada(s), {new} nova(s)", _SYNC_COLORS["MODIFIED"]
+        if new > 0:
+            return f"{new} nova(s)", _SYNC_COLORS["NEW"]
+        if modified > 0:
+            return f"{modified} editada(s)", _SYNC_COLORS["MODIFIED"]
+        if uploaded > 0 and uploaded == total:
+            return "Tudo enviado", _SYNC_COLORS["UPLOADED"]
+        if downloaded > 0:
+            return "Sincronizado", _SYNC_COLORS["DOWNLOADED"]
+        return f"{total} feat.", "#757575"
+
+    # ================================================================
+    # Event handlers
+    # ================================================================
+
     def _on_auth_changed(self, is_authenticated):
         if is_authenticated:
             self._refresh_list()
 
     def _on_loading_changed(self, operation, is_loading):
         if operation == "upload":
-            for row in range(self._table.rowCount()):
-                widget = self._table.cellWidget(row, 5)
-                if widget:
-                    for btn in widget.findChildren(QPushButton):
+            for row in range(self._card_list.count()):
+                widget = self._card_list.itemWidget(self._card_list.item(row))
+                if widget and hasattr(widget, "_action_buttons"):
+                    for btn in widget._action_buttons:
                         btn.setEnabled(not is_loading)
 
     def _on_upload_progress(self, status_data):
@@ -124,15 +313,58 @@ class CamadasTab(QWidget):
             pass
 
     def _on_zonal_upload_done(self):
-        """Upload zonal concluido — refresh lista."""
         self._refresh_list()
 
     def _on_upload_cancelled(self):
-        """Usuario cancelou upload via widget de progresso."""
         QgsMessageLog.logMessage(
             f"Upload cancelado pelo usuario: batch {self._active_batch_uuid}",
             PLUGIN_NAME, Qgis.Info,
         )
+
+    # ================================================================
+    # Sorting
+    # ================================================================
+
+    @staticmethod
+    def _sync_priority(counts):
+        """Prioridade para ordenação por status: MODIFIED > NEW > DOWNLOADED > UPLOADED."""
+        if counts.get("MODIFIED", 0) > 0:
+            return 0
+        if counts.get("NEW", 0) > 0:
+            return 1
+        if counts.get("DOWNLOADED", 0) > 0:
+            return 2
+        return 3
+
+    _SORT_KEYS = {
+        "#ID": lambda e: e.get("mapeamento_id") or 0,
+        "Data": lambda e: e.get("data_referencia") or "",
+        "Descrição": lambda e: (e.get("descricao") or "").lower(),
+        "Tamanho": lambda e: e.get("size_mb", 0),
+        "Status": lambda e: CamadasTab._sync_priority(e.get("sync_counts", {})),
+    }
+
+    def _sort_gpkg_list(self):
+        """Ordena _gpkg_list pelo critério selecionado."""
+        key_name = self._sort_combo.currentText()
+        key_fn = self._SORT_KEYS.get(key_name, self._SORT_KEYS["#ID"])
+        reverse = self._sort_toggle.isChecked()
+        self._gpkg_list.sort(key=key_fn, reverse=reverse)
+
+    def _on_sort_changed(self, _index):
+        """Re-renderiza lista com nova ordenação (sem re-escanear disco)."""
+        self._sort_gpkg_list()
+        self._render_cards()
+
+    def _on_sort_toggled(self, checked):
+        """Alterna ▲/▼ e re-renderiza."""
+        self._sort_toggle.setText("▼" if checked else "▲")
+        self._sort_gpkg_list()
+        self._render_cards()
+
+    # ================================================================
+    # Data & rendering
+    # ================================================================
 
     def _refresh_list(self):
         """Atualiza lista de GPKGs locais com status de sync."""
@@ -152,10 +384,11 @@ class CamadasTab(QWidget):
             )
             self._gpkg_list = []
 
-        self._update_table()
+        self._sort_gpkg_list()
+        self._render_cards()
 
-    def _update_table(self):
-        self._table.setRowCount(0)
+    def _render_cards(self):
+        self._card_list.clear()
 
         if not self._gpkg_list:
             self._status_label.setText("Nenhuma camada local encontrada")
@@ -163,152 +396,24 @@ class CamadasTab(QWidget):
             return
 
         self._status_label.setVisible(False)
-        self._table.setRowCount(len(self._gpkg_list))
 
-        for i, gpkg_info in enumerate(self._gpkg_list):
-            zid = gpkg_info.get("zonal_id", "?")
-
-            # Coluna 0: #ID (mapeamento_id do sidecar)
-            mid = gpkg_info.get("mapeamento_id")
-            id_text = str(mid) if mid else "—"
-            self._table.setItem(i, 0, QTableWidgetItem(id_text))
-
-            # Coluna 1: Data Ref.
-            data_ref = "—"
-            raw_date = gpkg_info.get("data_referencia")
-            if raw_date:
-                try:
-                    from datetime import datetime
-                    dt = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
-                    data_ref = dt.strftime("%d/%m/%Y")
-                except (ValueError, AttributeError):
-                    data_ref = str(raw_date)[:10]
-            self._table.setItem(i, 1, QTableWidgetItem(data_ref))
-
-            # Coluna 2: Descricao
-            descricao = gpkg_info.get("descricao") or f"Zonal {zid}"
-            self._table.setItem(i, 2, QTableWidgetItem(descricao))
-
-            # Coluna 3: Sync status
+        for gpkg_info in self._gpkg_list:
             counts = gpkg_info.get("sync_counts", {})
-            sync_item = self._build_sync_status_item(counts)
-            self._table.setItem(i, 3, sync_item)
+            card = self._create_card(gpkg_info, counts)
 
-            # Coluna 4: Tamanho
-            size = gpkg_info.get("size_mb", 0)
-            self._table.setItem(i, 4, QTableWidgetItem(f"{size} MB"))
+            list_item = QListWidgetItem(self._card_list)
+            list_item.setSizeHint(card.sizeHint() + QSize(0, 8))
+            self._card_list.addItem(list_item)
+            self._card_list.setItemWidget(list_item, card)
 
-            # Coluna 5: Acoes
-            actions_widget = self._build_action_buttons(i, gpkg_info, counts)
-            self._table.setCellWidget(i, 5, actions_widget)
-
-        self._table.resizeRowsToContents()
-
-    def _build_sync_status_item(self, counts):
-        """Cria item de tabela com resumo de sync status colorido."""
-        modified = counts.get("MODIFIED", 0)
-        new = counts.get("NEW", 0)
-        uploaded = counts.get("UPLOADED", 0)
-        downloaded = counts.get("DOWNLOADED", 0)
-        total = counts.get("total", 0)
-
-        if new > 0 and modified > 0:
-            text = f"{modified} editada(s), {new} nova(s)"
-            color = _SYNC_COLORS["MODIFIED"]
-        elif new > 0:
-            text = f"{new} nova(s)"
-            color = _SYNC_COLORS["NEW"]
-        elif modified > 0:
-            text = f"{modified} editada(s)"
-            color = _SYNC_COLORS["MODIFIED"]
-        elif uploaded > 0 and uploaded == total:
-            text = "Tudo enviado"
-            color = _SYNC_COLORS["UPLOADED"]
-        elif downloaded > 0:
-            text = "Sincronizado"
-            color = _SYNC_COLORS["DOWNLOADED"]
-        else:
-            text = f"{total} feat."
-            color = "#757575"
-
-        item = QTableWidgetItem(text)
-        item.setForeground(QColor(color))
-        return item
-
-    def _build_action_buttons(self, row, gpkg_info, counts):
-        """Cria widget com botoes de acao para cada GPKG."""
-        widget = QWidget()
-        layout = QHBoxLayout()
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(4)
-
-        path = gpkg_info.get("path", "")
-        zonal_id = gpkg_info.get("zonal_id")
-        modified = counts.get("MODIFIED", 0)
-        new = counts.get("NEW", 0)
-        has_changes = modified > 0 or new > 0
-
-        # Botao Abrir
-        btn_open = QPushButton("Abrir")
-        btn_open.setFixedWidth(50)
-        btn_open.setToolTip("Abrir GeoPackage como camada editável no QGIS")
-        btn_open.setStyleSheet(
-            "QPushButton { background-color: #1976D2; color: white; "
-            "border: none; padding: 2px 6px; border-radius: 3px; font-size: 11px; }"
-            "QPushButton:hover { background-color: #1565C0; }"
-        )
-        btn_open.clicked.connect(
-            lambda _, p=path, zid=zonal_id: self._open_gpkg(p, zid)
-        )
-        layout.addWidget(btn_open)
-
-        # Botao Upload
-        btn_upload = QPushButton("Enviar")
-        btn_upload.setFixedWidth(50)
-
-        if has_changes:
-            btn_upload.setEnabled(True)
-            btn_upload.setStyleSheet(
-                "QPushButton { background-color: #FF9800; color: white; "
-                "border: none; padding: 2px 6px; border-radius: 3px; font-size: 11px; }"
-                "QPushButton:hover { background-color: #F57C00; }"
-            )
-            btn_upload.setToolTip(f"{modified + new} feature(s) para enviar")
-            btn_upload.clicked.connect(
-                lambda _, p=path: self._upload_gpkg(p)
-            )
-        else:
-            btn_upload.setEnabled(False)
-            btn_upload.setStyleSheet(
-                "QPushButton { background-color: #E0E0E0; color: #9E9E9E; "
-                "border: none; padding: 2px 6px; border-radius: 3px; font-size: 11px; }"
-            )
-            btn_upload.setToolTip("Sem alterações para enviar")
-
-        layout.addWidget(btn_upload)
-
-        # Botao Remover
-        btn_remove = QPushButton("X")
-        btn_remove.setFixedWidth(24)
-        btn_remove.setStyleSheet(
-            "QPushButton { background-color: #F44336; color: white; "
-            "border: none; padding: 2px; border-radius: 3px; font-size: 11px; }"
-            "QPushButton:hover { background-color: #D32F2F; }"
-        )
-        btn_remove.setToolTip("Remover GeoPackage local")
-        btn_remove.clicked.connect(
-            lambda _, p=path, mod=modified + new: self._remove_gpkg(p, mod)
-        )
-        layout.addWidget(btn_remove)
-
-        widget.setLayout(layout)
-        return widget
+    # ================================================================
+    # Actions
+    # ================================================================
 
     def _open_gpkg(self, gpkg_path, zonal_id):
-        """Carrega GPKG como camada editavel no QGIS com edit tracking."""
+        """Carrega GPKG como camada editável no QGIS com edit tracking."""
         layer_name = f"Zonal {zonal_id}" if zonal_id else os.path.basename(gpkg_path)
 
-        # Verifica se ja esta carregada (source() pode conter |layername=...)
         for existing in QgsProject.instance().mapLayers().values():
             if existing.source().split("|")[0] == gpkg_path:
                 QgsMessageLog.logMessage(
@@ -338,11 +443,10 @@ class CamadasTab(QWidget):
         if not self._state.is_authenticated:
             self._state.set_error("upload", "Nao autenticado")
             return
-
         self._controller.upload_zonal_edits(gpkg_path)
 
     def _remove_gpkg(self, gpkg_path, modified_count):
-        """Remove GPKG local com confirmacao se ha edicoes pendentes."""
+        """Remove GPKG local com confirmação se há edições pendentes."""
         if modified_count > 0:
             reply = QMessageBox.question(
                 self,
@@ -356,14 +460,12 @@ class CamadasTab(QWidget):
                 return
 
         try:
-            # Remove camada do projeto se carregada
             for layer_id, layer in QgsProject.instance().mapLayers().items():
                 if layer.source().split("|")[0] == gpkg_path:
                     QgsProject.instance().removeMapLayer(layer_id)
 
             os.remove(gpkg_path)
 
-            # Remove sidecar
             from ...domain.services.gpkg_service import sidecar_path
             sc_path = sidecar_path(gpkg_path)
             if os.path.exists(sc_path):
@@ -378,10 +480,18 @@ class CamadasTab(QWidget):
                 f"Erro ao remover GPKG: {e}", PLUGIN_NAME, Qgis.Warning,
             )
 
+    # ================================================================
+    # Public API
+    # ================================================================
+
     def refresh(self):
-        """API publica para atualizar lista de camadas."""
+        """API pública para atualizar lista de camadas."""
         self._refresh_list()
 
     def add_gpkg_entry(self, gpkg_info):
-        """Adiciona uma entrada de GPKG apos download."""
+        """Adiciona uma entrada de GPKG após download."""
         self._refresh_list()
+
+    def cleanup(self):
+        """Cleanup de recursos da aba de camadas."""
+        pass

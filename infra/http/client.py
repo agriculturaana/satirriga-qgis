@@ -142,6 +142,9 @@ class HttpClient(QObject):
 
         return request_id
 
+    def delete(self, url: str) -> str:
+        return self._make_request(url, "DELETE")
+
     def cancel(self, request_id: str):
         reply = self._pending.pop(request_id, None)
         self._request_urls.pop(request_id, None)

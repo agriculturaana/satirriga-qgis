@@ -10,6 +10,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ...infra.config.settings import DEFAULTS
+from ..theme import SectionHeader
 
 
 class ConfigTab(QWidget):
@@ -25,7 +26,10 @@ class ConfigTab(QWidget):
 
     def _build_ui(self):
         layout = QVBoxLayout()
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        section_header = SectionHeader("Configurações")
+        layout.addWidget(section_header)
 
         form = QFormLayout()
 
