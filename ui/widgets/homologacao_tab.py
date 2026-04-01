@@ -332,6 +332,18 @@ class HomologacaoTab(QWidget):
             )
             row5.addWidget(btn_aprovar)
 
+            btn_devolver = QPushButton("Devolver")
+            btn_devolver.setToolTip("Devolver para edição — retorna ao editor com orientações")
+            btn_devolver.setStyleSheet(
+                "QPushButton { background-color: #1565C0; color: white;"
+                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #0D47A1; }"
+            )
+            btn_devolver.clicked.connect(
+                lambda _, zid=item.id: self._on_devolver(zid)
+            )
+            row5.addWidget(btn_devolver)
+
             btn_reprovar = QPushButton("Reprovar")
             btn_reprovar.setStyleSheet(
                 "QPushButton { background-color: #C62828; color: white;"
@@ -481,17 +493,37 @@ class HomologacaoTab(QWidget):
                 decisao, motivo = result
                 self._controller.emitir_parecer(zonal_id, decisao, motivo)
 
+    def _on_devolver(self, zonal_id):
+        """Devolver para edição — parecer DEVOLVIDO com orientação ao editor."""
+        motivo, ok = self._ask_motivo(
+            "Devolver para edição",
+            "Orientação ao editor (mínimo 10 caracteres):",
+            min_chars=10,
+        )
+        if ok and motivo:
+            self._controller.emitir_parecer(zonal_id, "DEVOLVIDO", motivo)
+
     def _on_retirar(self, zonal_id):
         """Retirar homologação — submete parecer CANCELADO para zonal HOMOLOGADO."""
-        from ..dialogs.parecer_dialog import ParecerDialog
+        motivo, ok = self._ask_motivo(
+            "Retirar homologação",
+            "Motivo da retirada (mínimo 20 caracteres):",
+            min_chars=20,
+        )
+        if ok and motivo:
+            self._controller.emitir_parecer(zonal_id, "CANCELADO", motivo)
 
-        dialog = ParecerDialog(zonal_id, parent=self)
-        dialog.setWindowTitle("Retirar homologação")
-        if dialog.exec_() == ParecerDialog.Accepted:
-            result = dialog.get_result()
-            if result:
-                _decisao, motivo = result
-                self._controller.emitir_parecer(zonal_id, "CANCELADO", motivo)
+    def _ask_motivo(self, title, prompt, min_chars=10):
+        """Solicita motivo ao usuário com validação de tamanho mínimo."""
+        from qgis.PyQt.QtWidgets import QInputDialog
+        text, ok = QInputDialog.getMultiLineText(self, title, prompt)
+        if ok and len(text.strip()) < min_chars:
+            QMessageBox.warning(
+                self, title,
+                f"O texto deve ter no mínimo {min_chars} caracteres.",
+            )
+            return "", False
+        return text.strip(), ok
 
     def _on_suprimir(self, mapeamento_id):
         """Suprime mapeamento — exclusão definitiva (soft delete)."""

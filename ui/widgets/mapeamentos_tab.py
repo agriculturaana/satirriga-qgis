@@ -8,7 +8,7 @@ from qgis.PyQt.QtGui import QColor, QIcon, QTextDocument, QFontMetrics
 from qgis.PyQt.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QLineEdit, QComboBox, QListWidget, QListWidgetItem,
-    QFrame, QSizePolicy, QGraphicsDropShadowEffect,
+    QFrame, QSizePolicy, QGraphicsDropShadowEffect, QToolButton,
 )
 
 from qgis.core import QgsMessageLog, Qgis
@@ -25,6 +25,14 @@ from ...infra.config.settings import PLUGIN_NAME
 
 # Itens por página padrão (server-side)
 _PAGE_SIZE = 5
+
+# Opções de ordenação: label exibido → campo da API
+_SORT_OPTIONS = [
+    ("#ID", "mapeamentoId"),
+    ("Data", "dataReferencia"),
+    ("Autor", "author"),
+    ("Descrição", "descricao"),
+]
 
 # Debounce para busca textual (ms)
 _SEARCH_DEBOUNCE_MS = 400
@@ -160,6 +168,31 @@ class MapeamentosTab(QWidget):
 
         outer.addLayout(row2)
 
+        # Linha 3: ordenação
+        row3 = QHBoxLayout()
+        row3.setSpacing(4)
+
+        sort_label = QLabel("Ordenar:")
+        sort_label.setStyleSheet("font-size: 11px; color: #757575;")
+        row3.addWidget(sort_label)
+
+        self._sort_combo = QComboBox()
+        for label, _field in _SORT_OPTIONS:
+            self._sort_combo.addItem(label)
+        self._sort_combo.setCurrentIndex(0)
+        self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
+        row3.addWidget(self._sort_combo, 1)
+
+        self._sort_toggle = QToolButton()
+        self._sort_toggle.setText("▲")
+        self._sort_toggle.setFixedWidth(28)
+        self._sort_toggle.setToolTip("Alternar ascendente/descendente")
+        self._sort_toggle.setCheckable(True)
+        self._sort_toggle.toggled.connect(self._on_sort_toggled)
+        row3.addWidget(self._sort_toggle)
+
+        outer.addLayout(row3)
+
         frame.setLayout(outer)
         return frame
 
@@ -196,8 +229,7 @@ class MapeamentosTab(QWidget):
     # Card widget factory
     # ================================================================
 
-    @staticmethod
-    def _create_card(item):
+    def _create_card(self, item):
         """Cria widget de card para um CatalogoItem."""
         card = QWidget()
         card.setAttribute(Qt.WA_StyledBackground, True)
@@ -271,7 +303,7 @@ class MapeamentosTab(QWidget):
             except (ValueError, AttributeError):
                 data_ref = item.data_referencia[:10]
 
-        metodo_label = MapeamentosTab._format_metodo(item.metodo_apply) if item.metodo_apply else "—"
+        metodo_label = self._format_metodo(item.metodo_apply) if item.metodo_apply else "—"
         meta = QLabel(f"{data_ref}  ·  {metodo_label}")
         meta.setStyleSheet("font-size: 11px; color: #757575;")
         row2.addWidget(meta)
@@ -330,6 +362,38 @@ class MapeamentosTab(QWidget):
 
         layout.addLayout(row4)
 
+        # --- Linha 5: sinc. local + tamanho GPKG ---
+        from ...domain.services.gpkg_service import gpkg_path_for_zonal, read_sidecar
+        try:
+            base = self._controller.get_gpkg_base_dir()
+            gpkg = gpkg_path_for_zonal(base, item.id)
+            row5 = QHBoxLayout()
+            row5.setSpacing(6)
+
+            if os.path.isfile(gpkg):
+                sidecar = read_sidecar(gpkg)
+                sinc_status = "Baixado"
+                sinc_color = "#2E7D32"
+                if sidecar.get("editToken"):
+                    sinc_status = "Em edição"
+                    sinc_color = "#1565C0"
+                size_bytes = os.path.getsize(gpkg)
+                if size_bytes > 1024 * 1024:
+                    size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+                else:
+                    size_str = f"{size_bytes / 1024:.0f} KB"
+                sinc_label = QLabel(f"<b style='color:{sinc_color}'>{sinc_status}</b>  ·  {size_str}")
+            else:
+                sinc_label = QLabel("<span style='color:#9E9E9E'>Não baixado</span>")
+            sinc_label.setStyleSheet("font-size: 10px;")
+            sinc_label.setTextFormat(Qt.RichText)
+            row5.addWidget(sinc_label)
+            row5.addStretch()
+
+            layout.addLayout(row5)
+        except Exception:
+            pass
+
         card.setLayout(layout)
         card._download_btn = btn
         card._zonal_id = item.id
@@ -361,12 +425,16 @@ class MapeamentosTab(QWidget):
     # ================================================================
 
     def _request_page(self):
-        """Dispara requisição ao servidor com filtros e página corrente."""
+        """Dispara requisição ao servidor com filtros, ordenação e página corrente."""
         status = self._filter_status.currentData() or "CONSOLIDATED"
         metodo = self._filter_metodo.currentData() or ""
         mapeamento_id = self._filter_id.text().strip()
         author = self._filter_author.text().strip()
         descricao = self._filter_descricao.text().strip()
+
+        sort_index = self._sort_combo.currentIndex()
+        sort_field = _SORT_OPTIONS[sort_index][1]
+        sort_direction = "desc" if self._sort_toggle.isChecked() else "asc"
 
         self._controller.load_catalogo(
             page=self._current_page,
@@ -376,6 +444,8 @@ class MapeamentosTab(QWidget):
             mapeamento_id=mapeamento_id,
             author=author,
             descricao=descricao,
+            sort=sort_field,
+            direction=sort_direction,
         )
 
     # ================================================================
@@ -423,6 +493,19 @@ class MapeamentosTab(QWidget):
         self._request_page()
 
     def _on_filter_combo_changed(self, _index):
+        self._current_page = 1
+        self._request_page()
+
+    # ================================================================
+    # Ordenação (server-side)
+    # ================================================================
+
+    def _on_sort_changed(self, _index):
+        self._current_page = 1
+        self._request_page()
+
+    def _on_sort_toggled(self, checked):
+        self._sort_toggle.setText("▼" if checked else "▲")
         self._current_page = 1
         self._request_page()
 
