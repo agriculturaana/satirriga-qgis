@@ -96,7 +96,15 @@ class DownloadZonalTask(SatIrrigaTask):
             if checkout_resp.status_code == 409:
                 try:
                     err_body = checkout_resp.json()
-                    err_msg = err_body.get("message", "Zonal bloqueado (409)")
+                    if err_body.get("error") == "EM_EDICAO":
+                        usuario = err_body.get("usuario", "outro usuário")
+                        desde = err_body.get("desde", "")
+                        err_msg = (
+                            f"Este mapeamento está sendo editado por {usuario}"
+                            f"{' desde ' + desde[:10] if desde else ''}."
+                        )
+                    else:
+                        err_msg = err_body.get("message", "Zonal bloqueado (409)")
                 except Exception:
                     err_msg = "Zonal bloqueado (409)"
                 self._exception = Exception(err_msg)
@@ -287,54 +295,86 @@ class DownloadZonalTask(SatIrrigaTask):
 
             written_count = 0
             write_errors = 0
+            parse_errors = 0
             dst_lyr.StartTransaction()
 
-            for i, src_feat in enumerate(src_lyr):
-                if self.isCanceled():
-                    dst_lyr.RollbackTransaction()
-                    src_ds = None
-                    dst_ds = None
-                    return False
+            # Desabilita exceções GDAL para iteração resiliente:
+            # FlatGeobuf pode conter features com tipo de campo
+            # inconsistente (ex.: campo INTEGER com valor string),
+            # causando "Fatal error parsing feature". Sem exceções,
+            # GetNextFeature() retorna None em caso de erro, permitindo
+            # continuar com as demais features.
+            gdal.DontUseExceptions()
 
-                dst_feat = ogr.Feature(dst_defn)
-                geom = src_feat.GetGeometryRef()
-                if geom is not None:
-                    dst_feat.SetGeometry(geom.Clone())
+            try:
+                src_lyr.ResetReading()
+                max_iter = total_features + 100  # guarda contra loop infinito
+                i = 0
 
-                # Copiar atributos originais
-                for j in range(src_field_count):
-                    dst_feat.SetField(j, src_feat.GetField(j))
+                for _ in range(max_iter):
+                    if self.isCanceled():
+                        dst_lyr.RollbackTransaction()
+                        src_ds = None
+                        dst_ds = None
+                        return False
 
-                # Campos de sync V2
-                original_fid = src_feat.GetField(id_field_idx) if id_field_idx >= 0 else src_feat.GetFID()
-                dst_feat.SetField("_original_fid", original_fid)
-                dst_feat.SetField("_sync_status", SyncStatusEnum.DOWNLOADED.value)
-                dst_feat.SetField("_sync_timestamp", now_iso)
-                dst_feat.SetField("_zonal_id", self._zonal_id)
-                dst_feat.SetField("_edit_token", edit_token)
+                    src_feat = src_lyr.GetNextFeature()
+                    if src_feat is None:
+                        # Distingue fim real de erro de parse
+                        if gdal.GetLastErrorType() != gdal.CE_None:
+                            parse_errors += 1
+                            if parse_errors <= 5:
+                                self._log(
+                                    f"[Download] Feature {i + parse_errors} "
+                                    f"ignorada (parse error): "
+                                    f"{gdal.GetLastErrorMsg()}"
+                                )
+                            gdal.ErrorReset()
+                            continue
+                        break  # fim real das features
 
-                err = dst_lyr.CreateFeature(dst_feat)
-                if err == ogr.OGRERR_NONE:
-                    written_count += 1
-                else:
-                    write_errors += 1
-                    if write_errors <= 3:
+                    dst_feat = ogr.Feature(dst_defn)
+                    geom = src_feat.GetGeometryRef()
+                    if geom is not None:
+                        dst_feat.SetGeometry(geom.Clone())
+
+                    # Copiar atributos originais
+                    for j in range(src_field_count):
+                        dst_feat.SetField(j, src_feat.GetField(j))
+
+                    # Campos de sync V2
+                    original_fid = src_feat.GetField(id_field_idx) if id_field_idx >= 0 else src_feat.GetFID()
+                    dst_feat.SetField("_original_fid", original_fid)
+                    dst_feat.SetField("_sync_status", SyncStatusEnum.DOWNLOADED.value)
+                    dst_feat.SetField("_sync_timestamp", now_iso)
+                    dst_feat.SetField("_zonal_id", self._zonal_id)
+                    dst_feat.SetField("_edit_token", edit_token)
+
+                    err = dst_lyr.CreateFeature(dst_feat)
+                    if err == ogr.OGRERR_NONE:
+                        written_count += 1
+                    else:
+                        write_errors += 1
+                        if write_errors <= 3:
+                            self._log(
+                                f"[Download] CreateFeature falhou para "
+                                f"feature {i} (id={original_fid})"
+                            )
+
+                    # Log diagnostico da primeira feature
+                    if i == 0:
                         self._log(
-                            f"[Download] CreateFeature falhou para "
-                            f"feature {i} (id={original_fid})"
+                            f"[Download] Primeira feature: "
+                            f"geom_null={geom is None}, "
+                            f"geom_type={geom.GetGeometryType() if geom else 'N/A'}, "
+                            f"attrs={dst_feat.GetFieldCount()}"
                         )
 
-                # Log diagnostico da primeira feature
-                if i == 0:
-                    self._log(
-                        f"[Download] Primeira feature: "
-                        f"geom_null={geom is None}, "
-                        f"geom_type={geom.GetGeometryType() if geom else 'N/A'}, "
-                        f"attrs={dst_feat.GetFieldCount()}"
-                    )
-
-                if total_features > 0:
-                    self.setProgress(min(90, 55 + int((i + 1) * 35 / total_features)))
+                    i += 1
+                    if total_features > 0:
+                        self.setProgress(min(90, 55 + int((i) * 35 / total_features)))
+            finally:
+                gdal.UseExceptions()
 
             dst_lyr.CommitTransaction()
             # Flush e fecha GPKG e FGB
@@ -344,14 +384,23 @@ class DownloadZonalTask(SatIrrigaTask):
 
             self._log(
                 f"[Download] Resultado conversao: "
-                f"{written_count} escritas, {write_errors} erros, "
+                f"{written_count} escritas, {write_errors} erros de escrita, "
+                f"{parse_errors} erros de parse, "
                 f"{total_features} declaradas no FGB"
             )
+
+            if parse_errors > 0:
+                self._log(
+                    f"[Download] AVISO: {parse_errors} feature(s) do FGB "
+                    f"ignorada(s) por erro de parse (tipo de campo "
+                    f"inconsistente no servidor)"
+                )
 
             if written_count == 0 and total_features > 0:
                 self._exception = Exception(
                     f"FlatGeobuf declara {total_features} features mas nenhuma "
-                    f"foi escrita no GPKG ({write_errors} erros de escrita). "
+                    f"foi escrita no GPKG ({write_errors} erros de escrita, "
+                    f"{parse_errors} erros de parse). "
                     f"Possivel incompatibilidade de formato."
                 )
                 return False
