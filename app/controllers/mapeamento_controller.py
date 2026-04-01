@@ -1,6 +1,7 @@
 """Controller de mapeamentos — catalogo zonal, download, upload V2."""
 
 import json
+import os
 from urllib.parse import quote
 
 from qgis.PyQt.QtCore import QObject, QTimer, pyqtSignal
@@ -32,6 +33,14 @@ class MapeamentoController(QObject):
         self._http = http_client
         self._config = config_repo
         self._token_provider = token_provider
+
+        # Timer de renovação de editToken (verifica a cada 1h)
+        self._renew_timer = QTimer(self)
+        self._renew_timer.setInterval(60 * 60 * 1000)  # 1 hora
+        self._renew_timer.timeout.connect(self._check_token_renewal)
+        self._renew_timer.start()
+        self._pending_renew_id = None
+        self._pending_renew_zonal_id = None
 
         # Tracking de requests pendentes
         self._pending_catalogo_id = None
@@ -68,8 +77,9 @@ class MapeamentoController(QObject):
     # ----------------------------------------------------------------
 
     def load_catalogo(self, page=1, size=20, status="CONSOLIDATED", metodo="",
-                      mapeamento_id="", author="", descricao=""):
-        """Carrega catalogo de zonais com paginação e filtros server-side."""
+                      mapeamento_id="", author="", descricao="",
+                      sort="", direction=""):
+        """Carrega catalogo de zonais com paginação, filtros e ordenação server-side."""
         if not self._state.is_authenticated:
             return
 
@@ -82,6 +92,10 @@ class MapeamentoController(QObject):
             params += f"&descricao={quote(descricao)}"
         if metodo:
             params += f"&metodo={quote(metodo)}"
+        if sort:
+            params += f"&sort={quote(sort)}"
+        if direction:
+            params += f"&direction={quote(direction)}"
         url = self._api_url(f"/zonal/catalogo?{params}")
         self._state.set_loading("catalogo", True)
         self._pending_catalogo_id = self._http.get(url)
@@ -181,6 +195,64 @@ class MapeamentoController(QObject):
 
         url = self._api_url(f"/mapeamento/{mapeamento_id}/encerrar")
         self._http.post_json(url, b"{}")
+
+    def _check_token_renewal(self):
+        """Verifica sidecars locais e renova tokens com menos de 24h de validade."""
+        from datetime import datetime, timezone
+        from ...domain.services.gpkg_service import gpkg_base_dir, read_sidecar
+
+        if not self._state.is_authenticated or not self._token_provider:
+            return
+
+        base = gpkg_base_dir(self._config.get("gpkg_base_dir"))
+        if not os.path.isdir(base):
+            return
+
+        now = datetime.now(timezone.utc)
+        threshold_hours = 24
+
+        try:
+            entries = os.listdir(base)
+        except OSError:
+            return
+
+        for entry in entries:
+            try:
+                entry_path = os.path.join(base, entry)
+                if not os.path.isdir(entry_path):
+                    continue
+                for fname in os.listdir(entry_path):
+                    if not fname.endswith(".gpkg"):
+                        continue
+                    try:
+                        gpkg = os.path.join(entry_path, fname)
+                        sidecar = read_sidecar(gpkg)
+                        expires_at = sidecar.get("expiresAt")
+                        edit_token = sidecar.get("editToken")
+                        zonal_id = sidecar.get("zonalId")
+                        if not expires_at or not edit_token or not zonal_id:
+                            continue
+                        exp_dt = datetime.fromisoformat(
+                            expires_at.replace("Z", "+00:00")
+                        )
+                        remaining = (exp_dt - now).total_seconds() / 3600
+                        if 0 < remaining < threshold_hours:
+                            self._renew_edit_token(zonal_id, edit_token)
+                    except (ValueError, TypeError, OSError):
+                        continue
+            except OSError:
+                continue
+
+    def _renew_edit_token(self, zonal_id, edit_token):
+        """Envia POST /api/zonal/:id/renew-token."""
+        url = self._api_url(f"/zonal/{zonal_id}/renew-token")
+        payload = json.dumps({"editToken": edit_token}).encode("utf-8")
+        self._pending_renew_id = self._http.post_json(url, payload)
+        self._pending_renew_zonal_id = zonal_id
+        QgsMessageLog.logMessage(
+            f"Renovando editToken para zonal #{zonal_id}",
+            PLUGIN_NAME, Qgis.Info,
+        )
 
     def load_raster_images(self, job_id, metodo_apply):
         """Carrega URLs de tiles raster para um job."""
@@ -357,6 +429,32 @@ class MapeamentoController(QObject):
                 )
             except Exception as e:
                 self._state.set_error("suprimir", str(e))
+
+        elif request_id == self._pending_renew_id:
+            self._pending_renew_id = None
+            zonal_id = self._pending_renew_zonal_id
+            self._pending_renew_zonal_id = None
+            try:
+                from ...domain.services.gpkg_service import (
+                    gpkg_base_dir, gpkg_path_for_zonal, read_sidecar, write_sidecar,
+                )
+                data = json.loads(body)
+                new_expires = data.get("expiresAt")
+                if new_expires and zonal_id:
+                    base = gpkg_base_dir(self._config.get("gpkg_base_dir"))
+                    gpkg = gpkg_path_for_zonal(base, zonal_id)
+                    sidecar = read_sidecar(gpkg)
+                    sidecar["expiresAt"] = new_expires
+                    write_sidecar(gpkg, sidecar)
+                    QgsMessageLog.logMessage(
+                        f"editToken renovado para zonal #{zonal_id} até {new_expires}",
+                        PLUGIN_NAME, Qgis.Info,
+                    )
+            except Exception as e:
+                QgsMessageLog.logMessage(
+                    f"Erro ao atualizar sidecar após renovação: {e}",
+                    PLUGIN_NAME, Qgis.Warning,
+                )
 
         elif request_id in self._pending_versions_ids:
             zonal_id = self._pending_versions_ids.pop(request_id)
@@ -612,9 +710,25 @@ class MapeamentoController(QObject):
 
         Usa beforeCommitChanges para capturar IDs editados do editBuffer,
         e afterCommitChanges para persistir o _sync_status no GPKG.
+
+        Oculta campos internos (_sync_status, _original_fid, etc.) do
+        formulario de atributos do QGIS para evitar que o usuario ou
+        o mecanismo "Remember last entered values" sobrescreva valores
+        de controle de sync.
         """
+        from qgis.core import QgsEditorWidgetSetup
+        from ...domain.services.attribute_schema import INTERNAL_FIELDS
+
         layer_id = layer.id()
         self._pending_edit_fids[layer_id] = {"changed": set()}
+
+        # Oculta campos internos do formulario de atributos
+        for field_name in INTERNAL_FIELDS:
+            idx = layer.fields().indexOf(field_name)
+            if idx >= 0:
+                layer.setEditorWidgetSetup(
+                    idx, QgsEditorWidgetSetup("Hidden", {})
+                )
 
         layer.beforeCommitChanges.connect(
             lambda: self._capture_edited_fids(layer)
@@ -671,8 +785,11 @@ class MapeamentoController(QObject):
         Usa dataProvider().changeAttributeValues() para batch direto no GPKG,
         sem startEditing/commitChanges (evita loop de signals e e O(1) no provider).
 
-        Features novas sao detectadas por _sync_status NULL (os FIDs
-        temporarios negativos do editBuffer nao persistem apos commit).
+        Features novas sao detectadas por dois criterios complementares:
+        - _sync_status NULL/vazio (cenario primario apos commit)
+        - _original_fid NULL/0 com status != NEW/MODIFIED/UPLOADED (defesa
+          contra "Remember last entered values" do QGIS que pode preencher
+          _sync_status com valor de feature anterior)
         """
         from ...domain.models.enums import SyncStatusEnum
         from datetime import datetime, timezone
@@ -683,6 +800,7 @@ class MapeamentoController(QObject):
 
         sync_idx = layer.fields().indexOf("_sync_status")
         ts_idx = layer.fields().indexOf("_sync_timestamp")
+        ofid_idx = layer.fields().indexOf("_original_fid")
         if sync_idx < 0:
             QgsMessageLog.logMessage(
                 "[EditTrack] campo _sync_status nao encontrado na layer",
@@ -693,6 +811,11 @@ class MapeamentoController(QObject):
         now_iso = datetime.now(timezone.utc).isoformat()
         trackable = (
             SyncStatusEnum.DOWNLOADED.value,
+            SyncStatusEnum.MODIFIED.value,
+            SyncStatusEnum.UPLOADED.value,
+        )
+        already_tracked = (
+            SyncStatusEnum.NEW.value,
             SyncStatusEnum.MODIFIED.value,
             SyncStatusEnum.UPLOADED.value,
         )
@@ -715,13 +838,24 @@ class MapeamentoController(QObject):
                 attr_changes[fid] = changes
                 modified_count += 1
 
-        # 2) Features novas: _sync_status NULL apos commit
+        # 2) Features novas — dois criterios complementares:
+        #    a) _sync_status NULL/vazio (cenario primario)
+        #    b) _original_fid NULL/0 e status nao e NEW/MODIFIED/UPLOADED
+        #       (defesa contra "Remember values" do QGIS preenchendo
+        #       _sync_status = DOWNLOADED em features recem-criadas)
         for feat in layer.getFeatures():
             fid = feat.id()
             if fid in attr_changes:
                 continue
             status = feat.attribute(sync_idx)
-            if status is None or (isinstance(status, str) and status == ""):
+            original_fid = (
+                feat.attribute(ofid_idx) if ofid_idx >= 0 else None
+            )
+
+            status_is_null = not status
+            has_no_server_fid = not original_fid and status not in already_tracked
+
+            if status_is_null or has_no_server_fid:
                 changes = {sync_idx: SyncStatusEnum.NEW.value}
                 if ts_idx >= 0:
                     changes[ts_idx] = now_iso
