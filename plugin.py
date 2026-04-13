@@ -42,6 +42,9 @@ class SatIrrigaPlugin:
         self._auth_interceptor = None
         self._http_client = None
         self._mapeamento_controller = None
+        self._timeseries_controller = None
+        self._timeseries_map_tool = None
+        self._timeseries_tab = None
         self._config_controller = None
         self._camadas_tab = None
         self._upload_history_tab = None
@@ -49,6 +52,7 @@ class SatIrrigaPlugin:
         self._signal_connections = []  # [(signal, slot), ...] para cleanup
         self._pending_raster_group = None  # Grupo-alvo para rasters do download
         self._vis_action = None            # Acao de contexto "Ajustar visualizacao"
+        self._tile_auth_set = False        # Preprocessor de auth para tiles base
         self._initialized = False
 
     def _ensure_initialized(self):
@@ -83,6 +87,12 @@ class SatIrrigaPlugin:
         )
 
         self._config_controller = ConfigController(
+            config_repo=self._config_repo,
+        )
+
+        from .app.controllers.timeseries_controller import TimeSeriesController
+        self._timeseries_controller = TimeSeriesController(
+            http_client=self._http_client,
             config_repo=self._config_repo,
         )
 
@@ -191,7 +201,22 @@ class SatIrrigaPlugin:
                 pass
             self._vis_action = None
 
+        # Cleanup map tool de serie temporal
+        if self._timeseries_map_tool:
+            try:
+                self._timeseries_map_tool.cleanup()
+            except (RuntimeError, AttributeError):
+                pass
+            self._timeseries_map_tool = None
+        self._timeseries_tab = None
+
         # Cleanup controllers
+        if self._mapeamento_controller:
+            try:
+                self._mapeamento_controller.cleanup_polling()
+            except (RuntimeError, AttributeError):
+                pass
+
         if self._attribute_controller:
             try:
                 self._attribute_controller.cleanup()
@@ -204,6 +229,15 @@ class SatIrrigaPlugin:
                 self._auth_controller.cleanup()
             except (RuntimeError, TypeError):
                 pass
+
+        # Remove interceptor de tiles base
+        if self._tile_auth_set:
+            try:
+                from qgis.core import QgsNetworkAccessManager
+                QgsNetworkAccessManager.setRequestPreprocessor(None)
+            except Exception:
+                pass
+            self._tile_auth_set = False
 
         self._initialized = False
         self._log("Plugin v2 descarregado")
@@ -325,6 +359,18 @@ class SatIrrigaPlugin:
         logs_tab = LogsTab()
         self.dock.set_page_widget(SatIrrigaDock.PAGE_LOGS, logs_tab)
 
+        # Série Temporal: page 7
+        from .ui.tools.timeseries_map_tool import TimeSeriesMapTool
+        from .ui.widgets.timeseries_tab import TimeSeriesTab
+
+        self._timeseries_map_tool = TimeSeriesMapTool(self.iface.mapCanvas())
+        self._timeseries_tab = TimeSeriesTab(
+            controller=self._timeseries_controller,
+            map_tool=self._timeseries_map_tool,
+            canvas=self.iface.mapCanvas(),
+        )
+        self.dock.set_page_widget(SatIrrigaDock.PAGE_TIMESERIES, self._timeseries_tab)
+
         # Histórico: carregar ao autenticar e atualizar após upload
         self._connect(
             self._state.auth_state_changed,
@@ -360,6 +406,19 @@ class SatIrrigaPlugin:
         # Raster: criar camadas XYZ quando prontas
         self._connect(self._state.raster_layers_ready, self._on_raster_layers_ready)
 
+        # Mascara/ROI: criar camada vetorial quando geometria chegar
+        self._pending_mascara_groups = {}
+        self._connect(self._state.mascara_layer_ready, self._on_mascara_layer_ready)
+
+        # Série temporal: desativar map tool ao sair da aba
+        self._connect(
+            self.dock._activity_bar.page_changed,
+            lambda page: (
+                self._timeseries_tab.deactivate_tool()
+                if page != SatIrrigaDock.PAGE_TIMESERIES else None
+            ),
+        )
+
         # Acao de contexto: "Ajustar visualização..." em camadas raster SatIrriga
         self._setup_raster_context_action()
 
@@ -374,6 +433,11 @@ class SatIrrigaPlugin:
         # Dialog save -> atualiza camadas_tab (via edit_tracking_done)
         self._attribute_controller.feature_saved.connect(
             lambda _fid: self._mapeamento_controller.edit_tracking_done.emit()
+        )
+        # Overlay data -> attribute controller
+        self._connect(
+            self._mapeamento_controller.overlay_data_ready,
+            lambda _zid, data: self._attribute_controller.set_overlay_data(data),
         )
 
         # Reconecta edit tracking de camadas SatIrriga já presentes no projeto
@@ -412,10 +476,14 @@ class SatIrrigaPlugin:
             self._mapeamento_controller.connect_edit_tracking(
                 layer, zonal_id=zonal_id,
             )
+            self._mapeamento_controller.fetch_overlay_data(zonal_id)
             reconnected += 1
 
             counts = count_features_by_sync_status(source)
-            if counts.get("MODIFIED", 0) > 0 or counts.get("NEW", 0) > 0:
+            pending = (counts.get("MODIFIED", 0)
+                       + counts.get("NEW", 0)
+                       + counts.get("DELETED", 0))
+            if pending > 0:
                 pending_count += 1
 
         if pending_count > 0:
@@ -440,6 +508,7 @@ class SatIrrigaPlugin:
             modified_total = sum(
                 entry.get("sync_counts", {}).get("MODIFIED", 0)
                 + entry.get("sync_counts", {}).get("NEW", 0)
+                + entry.get("sync_counts", {}).get("DELETED", 0)
                 for entry in camadas_tab._gpkg_list
             )
             camadas_btn.set_badge(modified_total)
@@ -489,6 +558,166 @@ class SatIrrigaPlugin:
             return
         self.customize_raster_vis(layer)
 
+    # ------------------------------------------------------------------
+    # Camadas Base (Google Satellite + Vector Tiles MVT)
+    # ------------------------------------------------------------------
+
+    def _setup_tile_auth(self):
+        """Registra interceptor global para injetar Bearer token em tiles base.
+
+        Usa QgsNetworkAccessManager.setRequestPreprocessor() para adicionar
+        Authorization header em requisicoes para /bases/tiles/ no host da API.
+        """
+        if self._tile_auth_set:
+            return
+
+        from urllib.parse import urlparse
+        from qgis.core import QgsNetworkAccessManager
+
+        api_host = urlparse(self._config_repo.get("api_base_url")).hostname
+        token_provider = self._auth_controller.get_access_token
+
+        def _inject_bearer(request):
+            url = request.url()
+            if url.host() == api_host and "/bases/tiles/" in url.path():
+                token = token_provider()
+                if token:
+                    request.setRawHeader(
+                        b"Authorization",
+                        f"Bearer {token}".encode("utf-8"),
+                    )
+
+        try:
+            QgsNetworkAccessManager.setRequestPreprocessor(_inject_bearer)
+            self._tile_auth_set = True
+            self._log("[Auth] Interceptor de tiles base registrado")
+        except Exception as e:
+            self._log(
+                f"[Auth] Falha ao registrar interceptor de tiles: {e}",
+                Qgis.Warning,
+            )
+
+    def _add_base_layers(self, group):
+        """Adiciona camadas base ao grupo do mapeamento.
+
+        Cria subgrupo 'Camadas Base' com Google Satellite (XYZ) e
+        limites geograficos (Vector Tiles MVT autenticados).
+        Todas as camadas sao adicionadas invisiveis por padrao.
+        """
+        from qgis.core import QgsProject, QgsRasterLayer
+
+        # Evita duplicatas
+        for child in group.children():
+            if hasattr(child, "name") and child.name() == "Camadas Base":
+                return
+
+        base_group = group.addGroup("Camadas Base")
+
+        # Google Satellite (XYZ, sem auth)
+        sat_url = "https://mt1.google.com/vt/lyrs%3Ds%26x%3D{x}%26y%3D{y}%26z%3D{z}"
+        uri = f"type=xyz&url={sat_url}&zmin=0&zmax=19"
+        satellite = QgsRasterLayer(uri, "Google Satellite", "wms")
+        if satellite.isValid():
+            QgsProject.instance().addMapLayer(satellite, False)
+            node = base_group.addLayer(satellite)
+            node.setItemVisibilityChecked(False)
+
+        # Vector tiles (limites geograficos)
+        self._setup_tile_auth()
+        self._add_vector_tile_layers(base_group)
+
+        base_group.setExpanded(False)
+
+    def _add_vector_tile_layers(self, base_group):
+        """Adiciona camadas de limites via Vector Tiles MVT autenticados."""
+        try:
+            from qgis.core import (
+                QgsProject,
+                QgsVectorTileLayer,
+                QgsVectorTileBasicRenderer,
+                QgsVectorTileBasicRendererStyle,
+            )
+            from qgis.core import QgsFillSymbol, QgsWkbTypes
+        except ImportError:
+            self._log(
+                "QgsVectorTileLayer nao disponivel nesta versao do QGIS",
+                Qgis.Warning,
+            )
+            return
+
+        api_base = self._config_repo.get("api_base_url").rstrip("/")
+
+        configs = [
+            {
+                "id": "municipios",
+                "name": "Municípios",
+                "zmin": 4, "zmax": 14,
+                "stroke_color": "#7f8c8d",
+                "stroke_width": "0.4",
+                "stroke_style": "dash",
+                "fill": False,
+            },
+            {
+                "id": "bacias",
+                "name": "Bacias Hidrográficas",
+                "zmin": 4, "zmax": 6,
+                "stroke_color": "#2980b9",
+                "stroke_width": "0.6",
+                "stroke_style": "solid",
+                "fill": False,
+            },
+            {
+                "id": "empreendimentos",
+                "name": "Empreendimentos",
+                "zmin": 6, "zmax": 8,
+                "stroke_color": "#e67e22",
+                "stroke_width": "0.5",
+                "stroke_style": "solid",
+                "fill": True,
+                "fill_color": "230,126,34,38",
+            },
+        ]
+
+        for cfg in configs:
+            tile_url = (
+                f"{api_base}/bases/tiles/{cfg['id']}"
+                "/{z}/{x}/{y}.pbf"
+            )
+            uri = f"type=xyz&url={tile_url}&zmin={cfg['zmin']}&zmax={cfg['zmax']}"
+
+            vtl = QgsVectorTileLayer(uri, cfg["name"])
+            if not vtl.isValid():
+                self._log(
+                    f"Falha ao criar camada base: {cfg['name']}",
+                    Qgis.Warning,
+                )
+                continue
+
+            # Estilo: poligono com borda colorida
+            props = {
+                "color": cfg.get("fill_color", "0,0,0,0") if cfg["fill"] else "0,0,0,0",
+                "outline_color": cfg["stroke_color"],
+                "outline_width": cfg["stroke_width"],
+                "outline_style": cfg["stroke_style"],
+            }
+            symbol = QgsFillSymbol.createSimple(props)
+
+            style = QgsVectorTileBasicRendererStyle()
+            style.setGeometryType(QgsWkbTypes.PolygonGeometry)
+            style.setLayerName(cfg["id"])
+            style.setSymbol(symbol)
+            style.setEnabled(True)
+            style.setMinZoomLevel(cfg["zmin"])
+            style.setMaxZoomLevel(18)
+
+            renderer = QgsVectorTileBasicRenderer()
+            renderer.setStyles([style])
+            vtl.setRenderer(renderer)
+
+            QgsProject.instance().addMapLayer(vtl, False)
+            node = base_group.addLayer(vtl)
+            node.setItemVisibilityChecked(False)
+
     def _on_zonal_download_completed(self, gpkg_path, zonal_id, catalogo_meta,
                                      camadas_tab):
         """Carrega GPKG V2 (zonal) no projeto QGIS apos download.
@@ -525,12 +754,15 @@ class SatIrrigaPlugin:
         if not group:
             group = root.addGroup(group_name)
 
-        layer = QgsVectorLayer(gpkg_path, f"Zonal {zonal_id}", "ogr")
+        metodo_label = self._format_metodo(metodo_apply)
+        layer_name = (
+            f"Zonal #{zonal_id} - {metodo_label}"
+            if metodo_label else f"Zonal #{zonal_id}"
+        )
+        layer = QgsVectorLayer(gpkg_path, layer_name, "ogr")
         if layer.isValid():
-            QgsProject.instance().addMapLayer(layer, False)
-            group.insertLayer(0, layer)
-
             # Estilo: somente borda laranja, sem preenchimento
+            # Aplicado ANTES de addMapLayer para que a legenda já reflita
             from qgis.core import QgsFillSymbol
             symbol = QgsFillSymbol.createSimple({})
             sl = symbol.symbolLayer(0)
@@ -538,6 +770,9 @@ class SatIrrigaPlugin:
             sl.setStrokeColor(QColor("#FF6600"))
             sl.setStrokeWidth(0.8)
             layer.renderer().setSymbol(symbol)
+
+            QgsProject.instance().addMapLayer(layer, False)
+            group.insertLayer(0, layer)
             layer.triggerRepaint()
 
             self._log(f"Camada V2 carregada: {gpkg_path}")
@@ -555,9 +790,27 @@ class SatIrrigaPlugin:
         # Dispara carregamento automatico de rasters de referencia
         if job_id and metodo_apply:
             self._pending_raster_group = group
-            self._mapeamento_controller.load_raster_images(job_id, metodo_apply)
+            self._mapeamento_controller.load_raster_images(
+                job_id, metodo_apply, gpkg_path=gpkg_path,
+            )
+
+        # Dispara carregamento da camada Mascara/ROI
+        if mapeamento_id:
+            self._pending_mascara_groups[mapeamento_id] = group
+            self._mapeamento_controller.load_mascara(mapeamento_id)
+
+        # Camadas base (Google Satellite + limites geograficos)
+        self._add_base_layers(group)
 
         camadas_tab.refresh()
+
+        # Auto-preenche datas da serie temporal a partir do mapeamento
+        data_ref = catalogo_meta.get("dataReferencia")
+        if data_ref and self._timeseries_tab:
+            self._timeseries_tab.set_data_referencia(data_ref)
+
+        # Busca dados de overlay para enriquecer dialog de atributos
+        self._mapeamento_controller.fetch_overlay_data(zonal_id)
 
     def _on_raster_layers_ready(self, hierarchy):
         """Cria arvore hierarquica de camadas raster XYZ no QGIS.
@@ -592,7 +845,10 @@ class SatIrrigaPlugin:
                 band_has_visible = False
 
                 for config in band_group.layers:
-                    uri = f"type=xyz&url={config.xyz_url}&zmin=0&zmax=18"
+                    # Escapa & na URL do tile para que o WMS provider
+                    # não confunda params do tile com params do provider
+                    safe_url = config.xyz_url.replace("&", "%26")
+                    uri = f"type=xyz&url={safe_url}&zmin=0&zmax=18"
                     layer = QgsRasterLayer(uri, config.name, "wms")
 
                     if not layer.isValid():
@@ -625,6 +881,67 @@ class SatIrrigaPlugin:
             f"Arvore raster criada: {len(hierarchy.dates)} datas, "
             f"{sum(len(dg.bands) for dg in hierarchy.dates)} bandas"
         )
+
+    @staticmethod
+    def _format_metodo(metodo_apply):
+        """Converte metodoApply em label legivel."""
+        if not metodo_apply:
+            return ""
+        labels = {
+            "METODO_1": "Fatiamento do índice de Vegetação",
+            "METODO_2_DISCRETO": "Detecção de mudança (discreto)",
+            "METODO_2_FUZZY": "Detecção de mudança (fuzzy)",
+            "METODO_3": "Método 3",
+            "AUTOMATICO": "Automático",
+        }
+        return labels.get(metodo_apply, metodo_apply)
+
+    def _on_mascara_layer_ready(self, mapeamento_id, geojson):
+        """Cria camada vetorial Mascara/ROI a partir da geometria do mapeamento."""
+        import json as _json
+        from qgis.core import QgsProject, QgsVectorLayer, QgsFillSymbol
+
+        group = self._pending_mascara_groups.pop(mapeamento_id, None)
+        if not group or not geojson:
+            return
+
+        # Monta GeoJSON FeatureCollection
+        fc = _json.dumps({
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature",
+                "geometry": geojson,
+                "properties": {"name": "Área de Interesse"},
+            }],
+        })
+
+        # Usa GDAL virtual filesystem para evitar arquivos temporarios
+        from osgeo import gdal
+        vsimem_path = f"/vsimem/satirriga_mascara_{mapeamento_id}.geojson"
+        gdal.FileFromMemBuffer(vsimem_path, fc.encode("utf-8"))
+
+        layer = QgsVectorLayer(vsimem_path, "Máscara", "ogr")
+        if not layer.isValid():
+            gdal.Unlink(vsimem_path)
+            self._log("Falha ao criar camada Máscara/ROI", Qgis.Warning)
+            return
+
+        # Estilo: sem preenchimento, borda amarela tracejada (stroke fino)
+        # Aplicado ANTES de addMapLayer para que a legenda já reflita
+        symbol = QgsFillSymbol.createSimple({})
+        sl = symbol.symbolLayer(0)
+        sl.setBrushStyle(Qt.NoBrush)
+        sl.setStrokeColor(QColor("#ffcc66"))
+        sl.setStrokeWidth(0.5)
+        sl.setStrokeStyle(Qt.DashLine)
+        layer.renderer().setSymbol(symbol)
+
+        layer.setReadOnly(True)
+        QgsProject.instance().addMapLayer(layer, False)
+        group.addLayer(layer)
+        layer.triggerRepaint()
+
+        self._log(f"Camada Máscara/ROI criada para mapeamento #{mapeamento_id}")
 
     def customize_raster_vis(self, layer):
         """Abre dialogo de customizacao para uma camada raster SatIrriga."""

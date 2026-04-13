@@ -1,9 +1,17 @@
 """Aba de logs — captura QgsMessageLog tag SatIrriga."""
 
-from qgis.PyQt.QtCore import Qt
+import os
+
+from qgis.PyQt.QtCore import Qt, QSize
+from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPlainTextEdit,
     QPushButton, QLabel, QApplication,
+)
+
+_ICONS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "assets", "icons",
 )
 from qgis.core import QgsApplication, QgsMessageLog
 
@@ -45,14 +53,16 @@ class LogsTab(QWidget):
 
         # Botoes
         btn_layout = QHBoxLayout()
-        clear_btn = QPushButton("Limpar")
-        clear_btn.setFixedWidth(80)
+        clear_btn = QPushButton(QIcon(os.path.join(_ICONS_DIR, "action_eraser.svg")), "Limpar")
+        clear_btn.setIconSize(QSize(14, 14))
+        clear_btn.setFixedWidth(90)
         clear_btn.setToolTip("Limpar todos os logs exibidos")
         clear_btn.clicked.connect(self._on_clear)
         btn_layout.addWidget(clear_btn)
 
-        copy_btn = QPushButton("Copiar")
-        copy_btn.setFixedWidth(80)
+        copy_btn = QPushButton(QIcon(os.path.join(_ICONS_DIR, "action_copy.svg")), "Copiar")
+        copy_btn.setIconSize(QSize(14, 14))
+        copy_btn.setFixedWidth(90)
         copy_btn.setToolTip("Copiar todos os logs para a área de transferência")
         copy_btn.clicked.connect(self._on_copy)
         btn_layout.addWidget(copy_btn)

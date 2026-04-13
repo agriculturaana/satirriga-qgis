@@ -1,10 +1,19 @@
 """Session Popup — card overlay com detalhes da sessao e logout."""
 
-from qgis.PyQt.QtCore import Qt
+import os
+
+from qgis.PyQt.QtCore import Qt, QSize
+from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import (
     QFrame, QVBoxLayout, QFormLayout, QLabel, QPushButton,
     QHBoxLayout,
 )
+
+_ICONS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "assets", "icons",
+)
+from ..icon_utils import tinted_icon
 
 
 class SessionPopup(QFrame):
@@ -91,7 +100,8 @@ class SessionPopup(QFrame):
         # Botao logout
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        self._logout_btn = QPushButton("Logout")
+        self._logout_btn = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_log_out.svg"), "#FFFFFF"), "Logout")
+        self._logout_btn.setIconSize(QSize(16, 16))
         self._logout_btn.setFixedWidth(120)
         self._logout_btn.setToolTip("Encerrar sessão e revogar tokens")
         self._logout_btn.setCursor(Qt.PointingHandCursor)

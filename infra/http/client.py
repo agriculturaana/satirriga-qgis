@@ -56,6 +56,8 @@ class HttpClient(QObject):
             reply = self._nam.put(req, QByteArray(data or b""))
         elif method == "DELETE":
             reply = self._nam.deleteResource(req)
+        elif method == "PATCH":
+            reply = self._nam.sendCustomRequest(req, b"PATCH", QByteArray(data or b""))
         else:
             self.request_error.emit(request_id, f"Metodo HTTP nao suportado: {method}")
             return request_id
@@ -141,6 +143,11 @@ class HttpClient(QObject):
         reply.finished.connect(lambda: self._on_finished(request_id, reply))
 
         return request_id
+
+    def patch(self, url: str, payload: bytes = b"{}") -> str:
+        return self._make_request(
+            url, "PATCH", data=payload, content_type="application/json"
+        )
 
     def delete(self, url: str) -> str:
         return self._make_request(url, "DELETE")

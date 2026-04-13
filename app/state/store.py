@@ -19,10 +19,17 @@ class AppState(QObject):
     # Raster
     raster_layers_ready = pyqtSignal(object)           # RasterHierarchy
 
+    # Mascara/ROI
+    mascara_layer_ready = pyqtSignal(int, object)      # mapeamento_id, geojson_geometry
+
     # Homologacao
     catalogo_homologacao_changed = pyqtSignal(list, dict)  # List[CatalogoItem], pagination dict
     parecer_emitido = pyqtSignal(dict)                # {parecerId, status, message}
     mapeamento_suprimido = pyqtSignal(dict)           # response data do DELETE
+    mapeamento_encerrado = pyqtSignal(dict)           # {mapeamentoId, message}
+    reprocess_overlay_done = pyqtSignal(int, str)     # zonal_id, message
+    zonal_status_polled = pyqtSignal(int, str)        # zonal_id, status_atual
+    zonal_finalizado = pyqtSignal(int, str)           # zonal_id, novo_status
 
     # UI feedback
     loading_changed = pyqtSignal(str, bool)          # (operation, is_loading)

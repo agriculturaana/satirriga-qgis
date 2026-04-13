@@ -91,8 +91,9 @@ class UploadHistoryWidget(QWidget):
         self._filter_status.currentIndexChanged.connect(self._on_filter_changed)
         section_header.add_widget(self._filter_status)
 
-        self._refresh_btn = QPushButton("Atualizar")
-        self._refresh_btn.setFixedWidth(70)
+        self._refresh_btn = QPushButton(QIcon(os.path.join(_ICONS_DIR, "action_refresh.svg")), "Atualizar")
+        self._refresh_btn.setIconSize(QSize(14, 14))
+        self._refresh_btn.setFixedWidth(90)
         self._refresh_btn.clicked.connect(self._request_page)
         section_header.add_widget(self._refresh_btn)
 

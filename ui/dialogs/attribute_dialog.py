@@ -5,15 +5,23 @@ secoes colapsaveis com widgets adequados (combos, datas, numeros).
 Salva via dataProvider().changeAttributeValues() — sem startEditing.
 """
 
+import os
 from datetime import datetime, timezone
 
-from qgis.PyQt.QtCore import Qt, QVariant, pyqtSignal, QDate
+from qgis.PyQt.QtCore import Qt, QVariant, QSize, pyqtSignal, QDate
+from qgis.PyQt.QtGui import QIcon, QKeySequence
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
     QPushButton, QScrollArea, QWidget, QLineEdit, QComboBox,
     QDoubleSpinBox, QDateEdit, QTextEdit, QShortcut, QFrame,
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
 )
-from qgis.PyQt.QtGui import QKeySequence
+
+_ICONS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "assets", "icons",
+)
+from ..icon_utils import tinted_icon
 
 from ...domain.models.enums import SyncStatusEnum
 from ...domain.services.attribute_schema import (
@@ -33,6 +41,7 @@ _SYNC_COLORS = {
     "MODIFIED": "#FF9800",
     "UPLOADED": "#4CAF50",
     "NEW": "#9C27B0",
+    "DELETED": "#F44336",
 }
 
 _DIALOG_STYLESHEET = """
@@ -74,12 +83,13 @@ class AttributeEditDialog(QDialog):
 
     feature_saved = pyqtSignal(int)  # fid apos salvar
 
-    def __init__(self, layer, feature, parent=None):
+    def __init__(self, layer, feature, parent=None, overlay_data=None):
         super().__init__(parent)
         self._layer = layer
         self._feature = feature
         self._fid = feature.id()
         self._widgets = {}  # field_name -> widget
+        self._overlay = overlay_data  # dict from /api/zonal/:id/overlay-data
 
         self._build_ui()
         self._setup_shortcuts()
@@ -192,6 +202,9 @@ class AttributeEditDialog(QDialog):
                 section.set_content_layout(form)
                 self._body_layout.addWidget(section)
 
+        # --- Secao Overlay (dados de overlay.overlay via API) ---
+        self._populate_overlay_section()
+
         # Campos nao mapeados (novos do servidor) -> secao "Outros"
         unmapped = []
         for fname in layer_field_names:
@@ -218,6 +231,132 @@ class AttributeEditDialog(QDialog):
             )
             section.set_content_layout(form)
             self._body_layout.addWidget(section)
+
+    def inject_overlay(self, overlay_data):
+        """Injeta dados de overlay tardiamente (quando chegam apos o dialog abrir)."""
+        self._overlay = overlay_data
+        self._populate_overlay_section(late_inject=True)
+
+    def _populate_overlay_section(self, late_inject=False):
+        """Cria secao read-only com dados de overlay (municipio, bacia, empreendimentos).
+
+        Args:
+            late_inject: se True, insere antes do stretch (ultima posicao util).
+        """
+        from qgis.core import QgsMessageLog, Qgis
+        _TAG = "SatIrriga"
+
+        if not self._overlay:
+            QgsMessageLog.logMessage(
+                f"[Overlay/Dialog] overlay vazio ou None para feature #{self._fid}",
+                _TAG, Qgis.Info,
+            )
+            return
+
+        # Resolve overlay para esta feature pelo _original_fid (= ZonalGeometria.id)
+        original_fid_idx = self._layer.fields().indexOf("_original_fid")
+        if original_fid_idx < 0:
+            QgsMessageLog.logMessage(
+                f"[Overlay/Dialog] campo _original_fid nao encontrado no layer",
+                _TAG, Qgis.Warning,
+            )
+            return
+        original_fid = self._feature.attribute(original_fid_idx)
+        if original_fid is None:
+            QgsMessageLog.logMessage(
+                f"[Overlay/Dialog] _original_fid e NULL para feature #{self._fid}",
+                _TAG, Qgis.Warning,
+            )
+            return
+
+        overlay_keys = list(self._overlay.keys())[:5]
+        entry = self._overlay.get(str(original_fid)) or self._overlay.get(original_fid)
+        if not entry:
+            QgsMessageLog.logMessage(
+                f"[Overlay/Dialog] chave {original_fid!r} (tipo {type(original_fid).__name__}) "
+                f"nao encontrada no overlay. Chaves disponiveis: {overlay_keys}",
+                _TAG, Qgis.Warning,
+            )
+            return
+
+        layout = QVBoxLayout()
+
+        # --- Localizacao ---
+        loc_form = QFormLayout()
+        loc_form.setLabelAlignment(Qt.AlignRight)
+        loc_fields = [
+            ("Municipio", entry.get("munnm")),
+            ("Cod. Municipio", entry.get("muncd")),
+            ("UF", entry.get("ufdsg")),
+            ("Bacia", entry.get("baf_nm")),
+            ("Cod. Bacia", entry.get("baf_cd")),
+        ]
+        for label, value in loc_fields:
+            if value is not None:
+                lbl = QLabel(str(value))
+                lbl.setStyleSheet("font-size: 12px; color: #424242; padding: 2px 8px;")
+                loc_form.addRow(f"{label}:", lbl)
+
+        if loc_form.rowCount() > 0:
+            layout.addLayout(loc_form)
+
+        # --- Empreendimentos (tabela) ---
+        empre = entry.get("empre")
+        if isinstance(empre, list) and len(empre) > 0:
+            emp_label = QLabel(f"Empreendimentos ({len(empre)})")
+            emp_label.setStyleSheet(
+                "font-size: 11px; font-weight: bold; color: #616161; "
+                "padding: 4px 0 2px 0;"
+            )
+            layout.addWidget(emp_label)
+
+            headers = ["Codigo", "Nome", "Usuario", "CPF/CNPJ", "NARH"]
+            table = QTableWidget(len(empre), len(headers))
+            table.setHorizontalHeaderLabels(headers)
+            table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            table.setAlternatingRowColors(True)
+            table.verticalHeader().setVisible(False)
+            table.horizontalHeader().setStretchLastSection(True)
+            table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            table.setStyleSheet(
+                "QTableWidget { font-size: 11px; border: 1px solid palette(mid); }"
+                "QHeaderView::section { font-size: 11px; font-weight: bold; "
+                "padding: 4px; background: palette(midlight); }"
+            )
+
+            for row, emp in enumerate(empre):
+                cpf_cnpj = emp.get("usunucnpj") or emp.get("usunucpf") or ""
+                values = [
+                    emp.get("empcd", ""),
+                    emp.get("empnm", ""),
+                    emp.get("usunm", ""),
+                    str(cpf_cnpj),
+                    emp.get("intnucnarh") or "",
+                ]
+                for col, val in enumerate(values):
+                    table.setItem(row, col, QTableWidgetItem(str(val)))
+
+            row_h = 26
+            table.setFixedHeight(min(row_h * len(empre) + 30, 200))
+            layout.addWidget(table)
+
+        if loc_form.rowCount() > 0 or (isinstance(empre, list) and len(empre) > 0):
+            section = CollapsibleSection(
+                title="Overlay",
+                icon="",
+                expanded=True,
+            )
+            section.set_content_layout(layout)
+
+            if late_inject:
+                # Insere antes do stretch (ultimo item do layout)
+                stretch_idx = self._body_layout.count() - 1
+                self._body_layout.insertWidget(
+                    max(stretch_idx, 0), section,
+                )
+            else:
+                self._body_layout.addWidget(section)
 
     def _create_widget(self, fspec):
         """Cria widget adequado ao tipo do campo."""
@@ -381,7 +520,8 @@ class AttributeEditDialog(QDialog):
         footer = QHBoxLayout()
         footer.addStretch()
 
-        btn_cancel = QPushButton("Cancelar")
+        btn_cancel = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_ban.svg"), "#FFFFFF"), "Cancelar")
+        btn_cancel.setIconSize(QSize(14, 14))
         btn_cancel.setToolTip("Fechar sem salvar (Esc)")
         btn_cancel.setStyleSheet(
             "QPushButton { background-color: #9E9E9E; color: white; "
@@ -391,7 +531,8 @@ class AttributeEditDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
         footer.addWidget(btn_cancel)
 
-        btn_save = QPushButton("Salvar")
+        btn_save = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_save.svg"), "#FFFFFF"), "Salvar")
+        btn_save.setIconSize(QSize(14, 14))
         btn_save.setToolTip("Salvar alterações (Ctrl+S)")
         btn_save.setStyleSheet(
             "QPushButton { background-color: #4CAF50; color: white; "

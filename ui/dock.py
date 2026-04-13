@@ -1,10 +1,10 @@
 import os
 
-from qgis.PyQt.QtCore import pyqtSignal, Qt
+from qgis.PyQt.QtCore import pyqtSignal, Qt, QSize
 from qgis.PyQt.QtGui import QPixmap, QPainter, QColor, QLinearGradient
 from qgis.PyQt.QtWidgets import (
     QDockWidget, QVBoxLayout, QHBoxLayout, QWidget,
-    QStackedWidget, QLabel,
+    QStackedWidget, QLabel, QSizePolicy,
 )
 
 from ..infra.config.settings import (
@@ -27,6 +27,7 @@ class SatIrrigaDock(QDockWidget):
     PAGE_HISTORICO = 4
     PAGE_CONFIG = 5
     PAGE_LOGS = 6
+    PAGE_TIMESERIES = 7
 
     def __init__(self, state, config_repo, parent=None):
         super().__init__(parent)
@@ -34,6 +35,11 @@ class SatIrrigaDock(QDockWidget):
         self._config = config_repo
         self.setWindowTitle(f"SatIrriga v{PLUGIN_VERSION}")
         self.setObjectName("SatIrrigaDock")
+
+        # Permitir apenas áreas laterais — nunca topo/base (evita reduzir altura do canvas)
+        self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.setMinimumWidth(340)
+        self.setMaximumWidth(480)
 
         self._build_ui()
         self._connect_signals()
@@ -79,7 +85,8 @@ class SatIrrigaDock(QDockWidget):
         # Placeholders (serao substituidos via set_page_widget)
         for label_text in ("Home", "Catálogo Zonal (requer login)", "Camadas locais",
                            "Homologação (requer permissão)", "Histórico de envios",
-                           "Configurações", "Logs"):
+                           "Configurações", "Logs",
+                           "Série Temporal (requer login)"):
             placeholder = QLabel(label_text)
             placeholder.setAlignment(Qt.AlignCenter)
             placeholder.setStyleSheet("font-size: 12px;")
@@ -89,7 +96,8 @@ class SatIrrigaDock(QDockWidget):
 
         content_widget = QWidget()
         content_widget.setLayout(content)
-        main_layout.addWidget(content_widget)
+        content_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        main_layout.addWidget(content_widget, 1)  # stretch=1: preenche todo espaço vertical
 
         container.setLayout(main_layout)
         self.setWidget(container)
@@ -151,6 +159,7 @@ class SatIrrigaDock(QDockWidget):
         )
         self._homologacao_btn.setVisible(False)
         self._activity_bar.add_button("nav_historico", "Histórico de envios", self.PAGE_HISTORICO)
+        self._activity_bar.add_button("nav_timeseries", "Série temporal", self.PAGE_TIMESERIES)
         self._activity_bar.add_stretch()
         self._activity_bar.add_button("nav_config", "Configurações do plugin", self.PAGE_CONFIG)
         self._activity_bar.add_button("nav_logs", "Logs de operações", self.PAGE_LOGS)
@@ -173,13 +182,13 @@ class SatIrrigaDock(QDockWidget):
                 self._user_label.setText("Não autenticado")
 
     def _on_user_changed(self, user):
-        if not isinstance(self._user_label, QLabel):
-            return
-        if user:
-            display = getattr(user, "name", None) or getattr(user, "email", "Usuario")
-            self._user_label.setText(display)
-        else:
-            self._user_label.setText("Não autenticado")
+        # Atualiza label de usuario (QLabel nativo ou SessionHeader)
+        if isinstance(self._user_label, QLabel):
+            if user:
+                display = getattr(user, "name", None) or getattr(user, "email", "Usuario")
+                self._user_label.setText(display)
+            else:
+                self._user_label.setText("Não autenticado")
 
         # Exibe/oculta botao de homologacao conforme role
         is_homologador = getattr(user, "is_homologador", False) if user else False
@@ -200,6 +209,17 @@ class SatIrrigaDock(QDockWidget):
     @property
     def pages(self):
         return self._pages
+
+    def sizeHint(self):
+        # Largura preferencial; altura delegada ao espaço disponível
+        hint = super().sizeHint()
+        hint.setWidth(380)
+        return hint
+
+    def minimumSizeHint(self):
+        # Impede que o dock force o QGIS a expandir a janela.
+        # Header (48) + espaço mínimo para conteúdo (~120)
+        return QSize(self.minimumWidth(), 168)
 
     def closeEvent(self, event):
         self.closed.emit()

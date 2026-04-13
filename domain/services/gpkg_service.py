@@ -111,7 +111,7 @@ def count_features_by_sync_status(gpkg_path_str: str) -> dict:
     """
     from qgis.core import QgsVectorLayer
 
-    counts = {"DOWNLOADED": 0, "MODIFIED": 0, "UPLOADED": 0, "NEW": 0, "total": 0}
+    counts = {"DOWNLOADED": 0, "MODIFIED": 0, "UPLOADED": 0, "NEW": 0, "DELETED": 0, "total": 0}
     layer = QgsVectorLayer(gpkg_path_str, "count_sync", "ogr")
     if not layer.isValid():
         return counts

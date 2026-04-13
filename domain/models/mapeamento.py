@@ -39,6 +39,7 @@ class Mapeamento:
     percent_nuvem: Optional[int] = None
     can_homologar: Optional[bool] = None
     mascara_id: Optional[int] = None
+    geom: Optional[dict] = None
     user_name: Optional[str] = None
     metodos: List["Metodo"] = field(default_factory=list)
 
@@ -69,6 +70,7 @@ class Mapeamento:
             percent_nuvem=data.get("percentNuvem"),
             can_homologar=data.get("canHomologar"),
             mascara_id=data.get("mascaraId"),
+            geom=data.get("geom"),
             user_name=user_name,
             metodos=metodos,
         )

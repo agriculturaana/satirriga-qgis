@@ -1,10 +1,18 @@
 """Dialogo de customizacao de parametros de visualizacao raster."""
 
-from qgis.PyQt.QtCore import Qt
+import os
+
+from qgis.PyQt.QtCore import Qt, QSize
+from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QDoubleSpinBox, QComboBox, QPushButton,
     QGroupBox, QDialogButtonBox,
+)
+
+_ICONS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "assets", "icons",
 )
 
 from ...domain.models.raster import VisParams
@@ -94,7 +102,8 @@ class VisParamsDialog(QDialog):
         # Botoes
         btn_layout = QHBoxLayout()
 
-        btn_restore = QPushButton("Restaurar padrão")
+        btn_restore = QPushButton(QIcon(os.path.join(_ICONS_DIR, "action_rotate_cw.svg")), "Restaurar padrão")
+        btn_restore.setIconSize(QSize(14, 14))
         btn_restore.clicked.connect(self._restore_defaults)
         btn_layout.addWidget(btn_restore)
 

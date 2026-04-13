@@ -24,7 +24,7 @@ class RasterLayerConfig:
     """Configuracao de uma camada raster XYZ para carregamento no QGIS."""
     name: str              # nome de exibicao (ex: "24MXT_52")
     xyz_url: str           # URL XYZ completa (com params atuais)
-    layer_type: str        # RGB | NDVI | NDWI | ALBEDO | CLASS_IRRI | ET0 | DIF_IMG
+    layer_type: str        # RGB | NDVI | NDWI | ALBEDO | DIF_IMG
     tile: str = ""         # identificador da cena (ex: "24MXT_52")
     image_id: str = ""     # ID da imagem Sentinel-2 (para reconstruir URL)
     vis_params: VisParams = field(default_factory=VisParams)
@@ -35,7 +35,7 @@ class RasterLayerConfig:
 class BandGroup:
     """Agrupamento de camadas por banda/indice espectral."""
     band_name: str                      # "Classificacao", "RGB", "NDVI", etc.
-    band_key: str                       # "classIrri", "original", "NDVI", etc.
+    band_key: str                       # "original", "NDVI", "NDWI", "albedo"
     layers: List[RasterLayerConfig] = field(default_factory=list)
 
 

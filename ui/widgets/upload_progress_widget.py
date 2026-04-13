@@ -1,12 +1,21 @@
 """Widget de progresso de upload zonal."""
 
-from qgis.PyQt.QtCore import Qt, pyqtSignal
+import os
+
+from qgis.PyQt.QtCore import Qt, QSize, pyqtSignal
+from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QProgressBar, QPushButton,
 )
 
-from ...domain.models.enums import UploadBatchStatusEnum
+_ICONS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "assets", "icons",
+)
+from ..icon_utils import tinted_icon
+
+from ...domain.models.enums import UploadBatchStatusEnum, ZonalStatusEnum
 
 
 class UploadProgressWidget(QWidget):
@@ -52,8 +61,9 @@ class UploadProgressWidget(QWidget):
         # Botao cancelar
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        self._cancel_btn = QPushButton("Cancelar")
-        self._cancel_btn.setFixedWidth(80)
+        self._cancel_btn = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_ban.svg"), "#FFFFFF"), "Cancelar")
+        self._cancel_btn.setIconSize(QSize(14, 14))
+        self._cancel_btn.setFixedWidth(90)
         self._cancel_btn.setToolTip("Cancelar envio em andamento")
         self._cancel_btn.setStyleSheet(
             "QPushButton { background-color: #F44336; color: white; "
@@ -81,9 +91,40 @@ class UploadProgressWidget(QWidget):
 
     def update_from_status(self, status_data: dict):
         """Atualiza todos os widgets a partir do status do batch."""
+        phase = status_data.get("phase", "upload")
+
+        # Fase de reprocessamento (overlay + zonal stats)
+        if phase == "reprocessing":
+            zonal_status = status_data.get("zonalStatus", "PROCESSING")
+            self._cancel_btn.setEnabled(False)
+            self._progress_bar.setRange(0, 0)  # indeterminada
+            self._status_label.setText(
+                "Recalculando overlay e estatísticas zonais..."
+            )
+            self._status_label.setStyleSheet("font-size: 11px; color: #2196F3;")
+            try:
+                status_enum = ZonalStatusEnum(zonal_status)
+                self._detail_label.setText(f"Status: {status_enum.label}")
+            except ValueError:
+                self._detail_label.setText(f"Status: {zonal_status}")
+            return
+
+        if phase == "reprocessing_done":
+            self._progress_bar.setRange(0, 100)
+            self._progress_bar.setValue(100)
+            self._cancel_btn.setEnabled(False)
+            self._status_label.setText("Concluído")
+            self._status_label.setStyleSheet("font-size: 11px; color: #4CAF50;")
+            self._detail_label.setText(
+                "Upload e reprocessamento finalizados"
+            )
+            return
+
+        # Fase de upload (comportamento existente)
         self._batch_uuid = status_data.get("batchUuid", self._batch_uuid)
 
         progress = status_data.get("progressPct", 0)
+        self._progress_bar.setRange(0, 100)
         self._progress_bar.setValue(progress)
 
         status = status_data.get("status", "")

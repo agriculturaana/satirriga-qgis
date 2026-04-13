@@ -15,6 +15,7 @@ from qgis.core import QgsProject, QgsVectorLayer, QgsMessageLog, Qgis
 from ...domain.models.enums import SyncStatusEnum
 from ...infra.config.settings import PLUGIN_NAME
 from ..theme import SectionHeader
+from ..icon_utils import tinted_icon
 
 _ICONS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -29,6 +30,7 @@ _SYNC_COLORS = {
     "MODIFIED": "#FF9800",     # laranja
     "UPLOADED": "#4CAF50",     # verde
     "NEW": "#9C27B0",          # roxo
+    "DELETED": "#F44336",      # vermelho
 }
 
 
@@ -52,8 +54,9 @@ class CamadasTab(QWidget):
 
         # Header
         section_header = SectionHeader("Camadas locais", "GeoPackage")
-        self._refresh_btn = QPushButton("Atualizar")
-        self._refresh_btn.setFixedWidth(80)
+        self._refresh_btn = QPushButton(QIcon(os.path.join(_ICONS_DIR, "action_refresh.svg")), "Atualizar")
+        self._refresh_btn.setIconSize(QSize(14, 14))
+        self._refresh_btn.setFixedWidth(90)
         self._refresh_btn.setToolTip("Atualizar lista de camadas locais")
         self._refresh_btn.clicked.connect(self._refresh_list)
         section_header.add_widget(self._refresh_btn)
@@ -74,9 +77,12 @@ class CamadasTab(QWidget):
         self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         sort_row.addWidget(self._sort_combo, 1)
 
+        self._icon_sort_asc = QIcon(os.path.join(_ICONS_DIR, "sort_asc.svg"))
+        self._icon_sort_desc = QIcon(os.path.join(_ICONS_DIR, "sort_desc.svg"))
         self._sort_toggle = QToolButton()
-        self._sort_toggle.setText("▲")
-        self._sort_toggle.setFixedWidth(28)
+        self._sort_toggle.setIcon(self._icon_sort_asc)
+        self._sort_toggle.setIconSize(QSize(18, 18))
+        self._sort_toggle.setFixedSize(28, 28)
         self._sort_toggle.setToolTip("Alternar ascendente/descendente")
         self._sort_toggle.setCheckable(True)
         self._sort_toggle.toggled.connect(self._on_sort_toggled)
@@ -114,6 +120,8 @@ class CamadasTab(QWidget):
         self._state.auth_state_changed.connect(self._on_auth_changed)
         self._state.loading_changed.connect(self._on_loading_changed)
         self._state.upload_progress_changed.connect(self._on_upload_progress)
+        self._state.mapeamento_encerrado.connect(self._on_mapeamento_encerrado)
+        self._state.error_occurred.connect(self._on_error)
 
         self._controller.zonal_upload_completed.connect(
             lambda path, zid: self._on_zonal_upload_done()
@@ -200,11 +208,13 @@ class CamadasTab(QWidget):
 
         modified = counts.get("MODIFIED", 0)
         new = counts.get("NEW", 0)
-        has_changes = modified > 0 or new > 0
+        deleted = counts.get("DELETED", 0)
+        has_changes = modified > 0 or new > 0 or deleted > 0
 
         # Abrir
-        btn_open = QPushButton("Abrir")
-        btn_open.setFixedWidth(50)
+        btn_open = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_folder_open.svg"), "#FFFFFF"), "Abrir")
+        btn_open.setIconSize(QSize(14, 14))
+        btn_open.setFixedWidth(65)
         btn_open.setToolTip("Abrir GeoPackage como camada editável no QGIS")
         btn_open.setStyleSheet(
             "QPushButton { background-color: #1976D2; color: white;"
@@ -217,8 +227,9 @@ class CamadasTab(QWidget):
         row3.addWidget(btn_open)
 
         # Enviar
-        btn_upload = QPushButton("Enviar")
-        btn_upload.setFixedWidth(50)
+        btn_upload = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_upload.svg"), "#FFFFFF"), "Enviar")
+        btn_upload.setIconSize(QSize(14, 14))
+        btn_upload.setFixedWidth(65)
         if has_changes:
             btn_upload.setEnabled(True)
             btn_upload.setStyleSheet(
@@ -226,7 +237,7 @@ class CamadasTab(QWidget):
                 " border: none; padding: 3px 8px; border-radius: 3px; font-size: 11px; }"
                 "QPushButton:hover { background-color: #F57C00; }"
             )
-            btn_upload.setToolTip(f"{modified + new} feature(s) para enviar")
+            btn_upload.setToolTip(f"{modified + new + deleted} feature(s) para enviar")
             btn_upload.clicked.connect(
                 lambda _, p=path: self._upload_gpkg(p)
             )
@@ -254,10 +265,37 @@ class CamadasTab(QWidget):
         )
         row3.addWidget(btn_remove)
 
+        # Encerrar para Homologação (visível quando todo o sync está completo)
+        uploaded = counts.get("UPLOADED", 0)
+        total = sum(counts.values())
+        all_uploaded = uploaded > 0 and uploaded == total
+        btn_encerrar = None
+        if mid and all_uploaded:
+            btn_encerrar = QPushButton(
+                tinted_icon(
+                    os.path.join(_ICONS_DIR, "action_check.svg"), "#FFFFFF"
+                ),
+                "Encerrar",
+            )
+            btn_encerrar.setIconSize(QSize(14, 14))
+            btn_encerrar.setFixedWidth(75)
+            btn_encerrar.setToolTip("Encerrar mapeamento para homologação")
+            btn_encerrar.setStyleSheet(
+                "QPushButton { background-color: #FF9800; color: white;"
+                " border: none; padding: 3px 8px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #F57C00; }"
+                "QPushButton:disabled { background-color: #FFE0B2; color: #BDBDBD; }"
+            )
+            btn_encerrar.clicked.connect(
+                lambda _, m=mid: self._encerrar_mapeamento(m)
+            )
+            row3.addWidget(btn_encerrar)
+
         layout.addLayout(row3)
 
         card.setLayout(layout)
         card._action_buttons = [btn_open, btn_upload]
+        card._btn_encerrar = btn_encerrar
         return card
 
     @staticmethod
@@ -265,16 +303,22 @@ class CamadasTab(QWidget):
         """Retorna (texto, cor) para o badge de sync status."""
         modified = counts.get("MODIFIED", 0)
         new = counts.get("NEW", 0)
+        deleted = counts.get("DELETED", 0)
         uploaded = counts.get("UPLOADED", 0)
         downloaded = counts.get("DOWNLOADED", 0)
         total = counts.get("total", 0)
 
-        if new > 0 and modified > 0:
-            return f"{modified} editada(s), {new} nova(s)", _SYNC_COLORS["MODIFIED"]
-        if new > 0:
-            return f"{new} nova(s)", _SYNC_COLORS["NEW"]
+        # Monta partes do resumo de alteracoes pendentes
+        parts = []
         if modified > 0:
-            return f"{modified} editada(s)", _SYNC_COLORS["MODIFIED"]
+            parts.append(f"{modified} editada(s)")
+        if new > 0:
+            parts.append(f"{new} nova(s)")
+        if deleted > 0:
+            parts.append(f"{deleted} removida(s)")
+
+        if parts:
+            return ", ".join(parts), _SYNC_COLORS["MODIFIED"]
         if uploaded > 0 and uploaded == total:
             return "Tudo enviado", _SYNC_COLORS["UPLOADED"]
         if downloaded > 0:
@@ -303,6 +347,14 @@ class CamadasTab(QWidget):
         self._upload_progress.setVisible(True)
         self._active_batch_uuid = status_data.get("batchUuid", self._active_batch_uuid)
 
+        phase = status_data.get("phase", "upload")
+
+        # Desabilitar/habilitar botão Encerrar conforme fase de reprocessamento
+        if phase == "reprocessing":
+            self._set_encerrar_buttons_enabled(False, "Aguardando reprocessamento...")
+        elif phase == "reprocessing_done":
+            self._refresh_list()
+
         from ...domain.models.enums import UploadBatchStatusEnum
         status = status_data.get("status", "")
         try:
@@ -311,6 +363,15 @@ class CamadasTab(QWidget):
                 QTimer.singleShot(3000, self._upload_progress.finish)
         except ValueError:
             pass
+
+    def _set_encerrar_buttons_enabled(self, enabled, tooltip=None):
+        """Habilita/desabilita botões Encerrar em todos os cards."""
+        for row in range(self._card_list.count()):
+            widget = self._card_list.itemWidget(self._card_list.item(row))
+            if widget and hasattr(widget, "_btn_encerrar") and widget._btn_encerrar:
+                widget._btn_encerrar.setEnabled(enabled)
+                if tooltip:
+                    widget._btn_encerrar.setToolTip(tooltip)
 
     def _on_zonal_upload_done(self):
         self._refresh_list()
@@ -321,20 +382,53 @@ class CamadasTab(QWidget):
             PLUGIN_NAME, Qgis.Info,
         )
 
+    def _encerrar_mapeamento(self, mapeamento_id):
+        """Confirma e encerra mapeamento para homologação."""
+        reply = QMessageBox.question(
+            self,
+            "Confirmar encerramento",
+            f"Encerrar mapeamento #{mapeamento_id} para homologação?\n\n"
+            "Todos os zonais consolidados serão enviados para revisão.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self._controller.encerrar_mapeamento(mapeamento_id)
+
+    def _on_mapeamento_encerrado(self, data):
+        """Feedback visual após encerramento bem-sucedido."""
+        mid = data.get("mapeamentoId")
+        msg = data.get("message", "Mapeamento encerrado")
+        QMessageBox.information(
+            self, "Mapeamento encerrado",
+            f"Mapeamento #{mid} encerrado com sucesso.\n\n{msg}",
+        )
+        self._refresh_list()
+
+    def _on_error(self, operation, message):
+        """Mostra erro de encerramento ao usuario."""
+        if operation == "encerrar":
+            QMessageBox.warning(
+                self, "Erro ao encerrar",
+                f"Não foi possível encerrar o mapeamento:\n\n{message}",
+            )
+
     # ================================================================
     # Sorting
     # ================================================================
 
     @staticmethod
     def _sync_priority(counts):
-        """Prioridade para ordenação por status: MODIFIED > NEW > DOWNLOADED > UPLOADED."""
+        """Prioridade para ordenação por status: MODIFIED > NEW > DELETED > DOWNLOADED > UPLOADED."""
         if counts.get("MODIFIED", 0) > 0:
             return 0
         if counts.get("NEW", 0) > 0:
             return 1
-        if counts.get("DOWNLOADED", 0) > 0:
+        if counts.get("DELETED", 0) > 0:
             return 2
-        return 3
+        if counts.get("DOWNLOADED", 0) > 0:
+            return 3
+        return 4
 
     _SORT_KEYS = {
         "#ID": lambda e: e.get("mapeamento_id") or 0,
@@ -357,8 +451,8 @@ class CamadasTab(QWidget):
         self._render_cards()
 
     def _on_sort_toggled(self, checked):
-        """Alterna ▲/▼ e re-renderiza."""
-        self._sort_toggle.setText("▼" if checked else "▲")
+        """Alterna ícone de ordenação e re-renderiza."""
+        self._sort_toggle.setIcon(self._icon_sort_desc if checked else self._icon_sort_asc)
         self._sort_gpkg_list()
         self._render_cards()
 
@@ -423,12 +517,25 @@ class CamadasTab(QWidget):
 
         layer = QgsVectorLayer(gpkg_path, layer_name, "ogr")
         if layer.isValid():
+            # Estilo: somente borda laranja, sem preenchimento
+            from qgis.core import QgsFillSymbol
+            from qgis.PyQt.QtCore import Qt as _Qt
+            from qgis.PyQt.QtGui import QColor as _QColor
+            symbol = QgsFillSymbol.createSimple({})
+            sl = symbol.symbolLayer(0)
+            sl.setBrushStyle(_Qt.NoBrush)
+            sl.setStrokeColor(_QColor("#FF6600"))
+            sl.setStrokeWidth(0.8)
+            layer.renderer().setSymbol(symbol)
+
             QgsProject.instance().addMapLayer(layer)
 
             if zonal_id is not None:
                 self._controller.connect_edit_tracking(
                     layer, zonal_id=zonal_id,
                 )
+                # Busca dados de overlay para enriquecer dialog de atributos
+                self._controller.fetch_overlay_data(zonal_id)
 
             QgsMessageLog.logMessage(
                 f"Camada aberta: {gpkg_path}", PLUGIN_NAME, Qgis.Info,

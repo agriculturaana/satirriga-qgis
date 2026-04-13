@@ -23,22 +23,38 @@ from ...domain.models.enums import UploadBatchStatusEnum
 class UploadZonalTask(SatIrrigaTask):
     """Exporta todas as features, envia via POST multipart, faz polling."""
 
-    def __init__(self, upload_url, access_token, gpkg_source_path,
+    def __init__(self, upload_url, checkout_url, access_token, gpkg_source_path,
                  zonal_id, edit_token, expected_version,
-                 conflict_strategy="REJECT_CONFLICTS"):
+                 conflict_strategy="REJECT_CONFLICTS",
+                 zonal_status_url=None):
         super().__init__(f"Upload zonal {zonal_id}")
         self._url = upload_url
+        self._checkout_url = checkout_url
         self._token = access_token
         self._source_path = gpkg_source_path
         self._zonal_id = zonal_id
         self._edit_token = edit_token
         self._expected_version = expected_version
         self._conflict_strategy = conflict_strategy
+        self._zonal_status_url = zonal_status_url
         self._batch_uuid = None
 
     @property
     def batch_uuid(self):
         return self._batch_uuid
+
+    def _update_sidecar(self, checkout_data):
+        """Atualiza sidecar com token fresco do re-checkout."""
+        try:
+            from ...domain.services.gpkg_service import read_sidecar, write_sidecar
+            sidecar = read_sidecar(self._source_path)
+            sidecar["editToken"] = checkout_data["editToken"]
+            sidecar["zonalVersion"] = checkout_data.get("zonalVersion", sidecar.get("zonalVersion"))
+            sidecar["snapshotHash"] = checkout_data.get("snapshotHash", sidecar.get("snapshotHash"))
+            sidecar["expiresAt"] = checkout_data.get("expiresAt", sidecar.get("expiresAt"))
+            write_sidecar(self._source_path, sidecar)
+        except Exception as e:
+            self._log(f"[Upload] Erro ao atualizar sidecar: {e}")
 
     def run(self):
         temp_dir = None
@@ -139,10 +155,58 @@ class UploadZonalTask(SatIrrigaTask):
                 return False
 
             # ----------------------------------------------------------
-            # 3. POST multipart (30-50%)
+            # 3. Re-checkout para obter token fresco (30-35%)
+            # ----------------------------------------------------------
+            self.signals.status_message.emit("Obtendo token de edição...")
+            headers = {"Authorization": f"Bearer {self._token}"}
+
+            self._log(f"[HTTP] POST {self._checkout_url} (re-checkout)")
+            try:
+                checkout_resp = requests.post(
+                    self._checkout_url, headers=headers, timeout=30,
+                )
+                self._log(f"[HTTP] {checkout_resp.status_code} {self._checkout_url}")
+
+                if checkout_resp.status_code == 200:
+                    checkout_data = checkout_resp.json()
+                    self._edit_token = checkout_data["editToken"]
+                    self._expected_version = checkout_data.get("zonalVersion", self._expected_version)
+                    self._log(
+                        f"[Upload] Re-checkout OK: token={self._edit_token[:8]}... "
+                        f"version={self._expected_version}"
+                    )
+                    # Atualiza sidecar com novo token
+                    self._update_sidecar(checkout_data)
+                elif checkout_resp.status_code == 409:
+                    try:
+                        err_body = checkout_resp.json()
+                        usuario = err_body.get("usuario", "outro usuário")
+                        self._exception = Exception(
+                            f"Zonal em edição por {usuario}. "
+                            f"Aguarde a liberação para enviar."
+                        )
+                    except Exception:
+                        self._exception = Exception(
+                            "Zonal em edição por outro usuário."
+                        )
+                    return False
+                else:
+                    self._log(
+                        f"[Upload] Re-checkout falhou ({checkout_resp.status_code}), "
+                        f"tentando upload com token existente"
+                    )
+            except requests.RequestException as e:
+                self._log(f"[Upload] Re-checkout falhou: {e}, tentando com token existente")
+
+            self.setProgress(35)
+
+            if self.isCanceled():
+                return False
+
+            # ----------------------------------------------------------
+            # 4. POST multipart (35-50%)
             # ----------------------------------------------------------
             self.signals.status_message.emit("Enviando para servidor...")
-            headers = {"Authorization": f"Bearer {self._token}"}
 
             self._log(f"[HTTP] POST {self._url} (auth=True, multipart)")
             with open(temp_zip, "rb") as f:
@@ -159,7 +223,21 @@ class UploadZonalTask(SatIrrigaTask):
             self._log(f"[HTTP] {response.status_code} {self._url}")
 
             if response.status_code == 403:
+                # Extrai mensagem real do servidor para diagnostico
+                try:
+                    err_body = response.json()
+                    server_code = err_body.get("code", "")
+                    server_msg = err_body.get("message", "")
+                    self._log(
+                        f"[Upload] 403 code={server_code} message={server_msg} "
+                        f"editToken={self._edit_token[:8]}..."
+                    )
+                except Exception:
+                    server_msg = response.text[:200]
+                    self._log(f"[Upload] 403 body={server_msg}")
+
                 self._exception = Exception(
+                    server_msg or
                     "Token de edicao invalido ou expirado. "
                     "Faca novo download do zonal."
                 )
@@ -258,9 +336,18 @@ class UploadZonalTask(SatIrrigaTask):
             self.setProgress(95)
 
             if batch_status == UploadBatchStatusEnum.COMPLETED.value:
-                self.setProgress(100)
-                self.signals.status_message.emit("Upload concluido!")
                 self._log(f"Upload zonal {self._zonal_id} concluido: batch {self._batch_uuid}")
+
+                # Fase 2: monitorar reprocessamento (overlay + zonal stats)
+                if self._zonal_status_url:
+                    self._poll_reprocessing(headers)
+
+                self.setProgress(100)
+                self.signals.status_message.emit("Concluído")
+                self.signals.upload_progress.emit({
+                    "phase": "reprocessing_done",
+                    "status": "COMPLETED",
+                })
                 return True
             elif batch_status == UploadBatchStatusEnum.FAILED.value:
                 error_log = status_data.get("errorLog", "Erro desconhecido")
@@ -285,3 +372,73 @@ class UploadZonalTask(SatIrrigaTask):
                     shutil.rmtree(temp_dir, ignore_errors=True)
                 except Exception:
                     pass
+
+    def _poll_reprocessing(self, headers):
+        """Monitora reprocessamento pos-upload (overlay + zonal stats).
+
+        Faz polling de GET /api/zonal/:id/status ate zonal.status
+        sair de PROCESSING. Timeout de 10 minutos.
+        """
+        self.signals.status_message.emit(
+            "Recalculando overlay e estatísticas zonais..."
+        )
+        self.signals.upload_progress.emit({
+            "phase": "reprocessing",
+            "zonalStatus": "PROCESSING",
+        })
+        self.setProgress(96)
+
+        max_polls = 200  # 200 * 3s = 10 min
+        poll_count = 0
+        last_zonal_status = ""
+
+        while poll_count < max_polls:
+            if self.isCanceled():
+                return
+
+            time.sleep(3)
+            poll_count += 1
+
+            try:
+                resp = requests.get(
+                    self._zonal_status_url, headers=headers, timeout=30,
+                )
+                if resp.status_code != 200:
+                    continue
+
+                data = resp.json()
+                zonal_status = data.get("status")
+
+                if not zonal_status:
+                    continue
+
+                if zonal_status != last_zonal_status:
+                    self._log(
+                        f"[Reprocessamento] zonal.status={zonal_status} "
+                        f"version={data.get('version')}"
+                    )
+                    last_zonal_status = zonal_status
+
+                self.signals.upload_progress.emit({
+                    "phase": "reprocessing",
+                    "zonalStatus": zonal_status,
+                })
+
+                # Saida: zonal saiu de estados intermediarios
+                if zonal_status not in (
+                    "PROCESSING", "OVERLAID", "CREATED", "CONSOLIDATING",
+                ):
+                    self._log(
+                        f"[Reprocessamento] Concluido: "
+                        f"zonal.status={zonal_status}"
+                    )
+                    self.setProgress(99)
+                    return
+
+            except requests.RequestException:
+                continue
+
+        self._log(
+            "[Reprocessamento] Timeout 10min — upload ja esta COMPLETED, "
+            "reprocessamento continua no servidor"
+        )

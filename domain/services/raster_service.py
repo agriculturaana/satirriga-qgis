@@ -45,29 +45,24 @@ _ALL_METHOD_KEYS = [
     "metodo_automatico_response",
 ]
 
-# Padroes de visualizacao por banda (espelha S2_BAND_DEFAULTS do jobs-server)
+# Padroes de visualizacao — calibrados com P2/P98 de 48k geometrias zonais
 _BAND_DEFAULTS = {
     "original":  VisParams(band="original", min_val=0, max_val=3000, gamma=1.2),
-    "NDVI":      VisParams(band="NDVI", min_val=-1, max_val=1, palette="NDVI"),
-    "NDWI":      VisParams(band="NDWI", min_val=-1, max_val=1, palette="NDWI"),
-    "albedo":    VisParams(band="albedo", min_val=0, max_val=1, palette="ALBEDO"),
-    "ET0":       VisParams(band="ET0", min_val=0, max_val=10, palette="ET0"),
-    "classIrri": VisParams(band="classIrri", min_val=1, max_val=1, palette="CLASS_IRRI"),
+    "NDVI":      VisParams(band="NDVI", min_val=0, max_val=0.8, palette="RDYLGN"),
+    "NDWI":      VisParams(band="NDWI", min_val=-0.7, max_val=0.4, palette="BLUES"),
+    "albedo":    VisParams(band="albedo", min_val=0.1, max_val=1.6, palette="HOT_R"),
 }
 
 # Mapeamento: chave em url_indices da API -> (band_key, display_name, layer_type, visible)
 # O servidor pode retornar tanto class_irri (snake) quanto classIrri (camel)
 _INDEX_KEY_MAP = {
-    "classIrri":  ("classIrri", "Classificação", "CLASS_IRRI", True),
-    "class_irri": ("classIrri", "Classificação", "CLASS_IRRI", True),
     "NDVI":       ("NDVI",      "NDVI",          "NDVI",       False),
     "NDWI":       ("NDWI",      "NDWI",          "NDWI",       False),
     "albedo":     ("albedo",    "Albedo",        "ALBEDO",     False),
-    "ET0":        ("ET0",       "ET0",           "ET0",        False),
 }
 
 # Ordem desejada das bandas na arvore QGIS
-_BAND_ORDER = ["classIrri", "original", "NDVI", "NDWI", "albedo", "ET0"]
+_BAND_ORDER = ["original", "NDVI", "NDWI", "albedo"]
 
 # Paletas disponiveis para customizacao
 AVAILABLE_PALETTES = [
@@ -75,8 +70,6 @@ AVAILABLE_PALETTES = [
     ("NDVI", "NDVI (branco → verde)"),
     ("NDWI", "NDWI (branco → azul)"),
     ("ALBEDO", "Albedo (preto → branco)"),
-    ("ET0", "ET0 (roxo → amarelo)"),
-    ("CLASS_IRRI", "Classificação (dourado)"),
     # Genericas (matplotlib)
     ("VIRIDIS", "Viridis"), ("VIRIDIS_R", "Viridis (invertida)"),
     ("PLASMA", "Plasma"), ("PLASMA_R", "Plasma (invertida)"),
@@ -90,38 +83,58 @@ AVAILABLE_PALETTES = [
 ]
 
 
-def get_default_vis_params(band: str) -> VisParams:
-    """Retorna VisParams padrao para uma banda. Fallback para original."""
-    defaults = _BAND_DEFAULTS.get(band)
-    if defaults:
-        return VisParams(
-            band=defaults.band,
-            min_val=defaults.min_val,
-            max_val=defaults.max_val,
-            gamma=defaults.gamma,
-            palette=defaults.palette,
-            gain=defaults.gain,
-            bias=defaults.bias,
+def get_default_vis_params(band: str, sidecar: dict = None) -> VisParams:
+    """Retorna VisParams para uma banda.
+
+    Prioridade: sidecar (por mapeamento) > global (QgsSettings) > hardcoded.
+    """
+    try:
+        from .vis_config_service import get_mapeamento_vis_params, get_global_vis_params
+        if sidecar:
+            return get_mapeamento_vis_params(sidecar, band)
+        return get_global_vis_params(band)
+    except Exception as e:
+        # Fallback para defaults hardcoded se vis_config_service falhar
+        from qgis.core import QgsMessageLog, Qgis
+        QgsMessageLog.logMessage(
+            f"[VisConfig] Fallback para hardcoded ({band}): {e}",
+            "SatIrriga", Qgis.Warning,
         )
-    return VisParams(band=band)
+        defaults = _BAND_DEFAULTS.get(band)
+        if defaults:
+            return VisParams(
+                band=defaults.band,
+                min_val=defaults.min_val,
+                max_val=defaults.max_val,
+                gamma=defaults.gamma,
+                palette=defaults.palette,
+                gain=defaults.gain,
+                bias=defaults.bias,
+            )
+        return VisParams(band=band)
 
 
 def build_xyz_url(image_id: str, vis_params: VisParams) -> str:
     """URL XYZ com parametros de visualizacao customizados.
 
-    Usado para reconstruir URLs com parametros alterados pelo usuario
-    (via dialogo de customizacao). Para exibicao inicial, usar as URLs
-    pre-construidas retornadas pela API.
+    Regra GEE: gamma e palette sao mutuamente exclusivos.
+    Quando palette esta definida, gamma e omitido.
     """
+    # Bandas multi-banda (RGB) nao aceitam palette no GEE
+    is_multiband = vis_params.band in ("original",)
+    has_palette = vis_params.palette and not is_multiband
+
     url = f"{_JOBS_BASE}/{image_id}/{{z}}/{{x}}/{{y}}?band={vis_params.band}"
     if vis_params.min_val is not None:
         url += f"&min={vis_params.min_val}"
     if vis_params.max_val is not None:
         url += f"&max={vis_params.max_val}"
-    if vis_params.gamma is not None:
-        url += f"&gamma={vis_params.gamma}"
-    if vis_params.palette:
+    # GEE: gamma e palette sao mutuamente exclusivos;
+    #       palette so funciona em bandas single-band
+    if has_palette:
         url += f"&palette={vis_params.palette}"
+    elif vis_params.gamma is not None:
+        url += f"&gamma={vis_params.gamma}"
     if vis_params.gain is not None:
         url += f"&gain={vis_params.gain}"
     if vis_params.bias is not None:
@@ -139,12 +152,12 @@ def get_tile_url(image_id: str, band: str = "original") -> str:
     return f"{_JOBS_BASE}/{image_id}/{{z}}/{{x}}/{{y}}?band={band}"
 
 
-def build_raster_hierarchy(tile_data, metodo_apply: str) -> RasterHierarchy:
+def build_raster_hierarchy(tile_data, metodo_apply: str,
+                           sidecar: dict = None) -> RasterHierarchy:
     """Constroi hierarquia de camadas raster a partir da resposta de tilesMetodos.
 
     Para tiles com ``id_imagem``, gera URLs diretas ao jobs-server com
-    apenas ``?band=X`` para todas as bandas (servidor aplica defaults).
-    Nao depende de ``url_indices`` ou ``metodo_apply`` para selecao.
+    parametros de visualizacao da configuracao (sidecar > global > hardcoded).
 
     Para tiles legados (sem ``id_imagem``), usa URLs pre-construidas da API.
 
@@ -154,6 +167,7 @@ def build_raster_hierarchy(tile_data, metodo_apply: str) -> RasterHierarchy:
     Args:
         tile_data: JSON da resposta de GET /api/mapeamento/tilesMetodos.
         metodo_apply: Ignorado na selecao de bandas — mantido por assinatura.
+        sidecar: Metadados do sidecar para config de vis por mapeamento.
 
     Returns:
         RasterHierarchy com datas > bandas > cenas.
@@ -189,11 +203,12 @@ def build_raster_hierarchy(tile_data, metodo_apply: str) -> RasterHierarchy:
             tile_name = tile_item.get("tile") or _extract_tile_name(image_id)
 
             if image_id:
-                # Acesso direto: gera URL simples para TODAS as bandas
-                _build_direct_layers(bands_map, image_id, tile_name)
+                # Acesso direto: gera URL com params de visualizacao
+                _build_direct_layers(bands_map, image_id, tile_name, sidecar)
             else:
                 # Legado: usa URLs pre-construidas da API
-                _build_legacy_layers(bands_map, tile_item, tile_name, image_id)
+                _build_legacy_layers(bands_map, tile_item, tile_name, image_id,
+                                     sidecar)
 
         # Monta BandGroups na ordem definida por _BAND_ORDER
         band_groups = []
@@ -227,20 +242,19 @@ def build_raster_hierarchy(tile_data, metodo_apply: str) -> RasterHierarchy:
     return RasterHierarchy(dates=date_groups)
 
 
-def _build_direct_layers(bands_map: dict, image_id: str, tile_name: str):
+def _build_direct_layers(bands_map: dict, image_id: str, tile_name: str,
+                         sidecar: dict = None):
     """Gera layers para TODAS as bandas via URL direta (tiles com image_id).
 
-    Usa ``get_tile_url`` para gerar URL simples com apenas ``?band=X``.
-    O servidor aplica parametros de visualizacao padrao automaticamente.
+    Usa configuracao de visualizacao (sidecar > global > hardcoded) para
+    gerar URLs com parametros customizados. Se nao houver customizacao,
+    gera URL simples com apenas ``?band=X`` (servidor aplica defaults).
     """
-    # Mapeamento: band_key -> (display_name, layer_type, default_visible)
     _DIRECT_BANDS = {
         "original":  ("RGB",            "RGB",        True),
-        "classIrri": ("Classificação",  "CLASS_IRRI", True),
         "NDVI":      ("NDVI",           "NDVI",       False),
         "NDWI":      ("NDWI",           "NDWI",       False),
         "albedo":    ("Albedo",         "ALBEDO",     False),
-        "ET0":       ("ET0",            "ET0",        False),
     }
 
     for band_key in _BAND_ORDER:
@@ -249,21 +263,26 @@ def _build_direct_layers(bands_map: dict, image_id: str, tile_name: str):
             continue
         display_name, layer_type, default_visible = info
 
+        vis_params = get_default_vis_params(band_key, sidecar)
+        # Gera URL com params customizados se houver config; senão URL simples
+        xyz_url = build_xyz_url(image_id, vis_params)
+
         bands_map.setdefault(band_key, []).append(
             RasterLayerConfig(
                 name=tile_name or display_name,
-                xyz_url=get_tile_url(image_id, band_key),
+                xyz_url=xyz_url,
                 layer_type=layer_type,
                 tile=tile_name,
                 image_id=image_id,
-                vis_params=get_default_vis_params(band_key),
+                vis_params=vis_params,
                 is_visible=default_visible,
             )
         )
 
 
 def _build_legacy_layers(bands_map: dict, tile_item: dict,
-                         tile_name: str, image_id: str):
+                         tile_name: str, image_id: str,
+                         sidecar: dict = None):
     """Gera layers para tiles legados (sem image_id) usando URLs da API.
 
     RGB vem do campo ``url``; indices espectrais de ``url_indices``
@@ -279,7 +298,7 @@ def _build_legacy_layers(bands_map: dict, tile_item: dict,
                 layer_type="RGB",
                 tile=tile_name,
                 image_id=image_id,
-                vis_params=get_default_vis_params("original"),
+                vis_params=get_default_vis_params("original", sidecar),
                 is_visible=True,
             )
         )
@@ -301,7 +320,7 @@ def _build_legacy_layers(bands_map: dict, tile_item: dict,
                 layer_type=layer_type,
                 tile=tile_name,
                 image_id=image_id,
-                vis_params=get_default_vis_params(band_key),
+                vis_params=get_default_vis_params(band_key, sidecar),
                 is_visible=default_visible,
             )
         )

@@ -20,6 +20,7 @@ class AttributeEditController(QObject):
         self._canvas = canvas
         self._current_layer = None
         self._dialog = None
+        self._overlay_data = None  # dict {zg_id: overlay} from /api/zonal/:id/overlay-data
 
         # Conecta troca de layer ativo
         self._canvas.currentLayerChanged.connect(self._on_layer_changed)
@@ -90,6 +91,16 @@ class AttributeEditController(QObject):
         self._close_dialog()
         self._open_dialog(layer, feature)
 
+    def set_overlay_data(self, data):
+        """Define dados de overlay para enriquecer o dialog de atributos.
+
+        Se o dialog já estiver aberto, injeta a seção overlay dinamicamente.
+        """
+        self._overlay_data = data
+
+        if self._dialog is not None and data:
+            self._dialog.inject_overlay(data)
+
     def _open_dialog(self, layer, feature):
         """Abre dialog de edicao de atributos."""
         from ...ui.dialogs.attribute_dialog import AttributeEditDialog
@@ -98,6 +109,7 @@ class AttributeEditController(QObject):
             layer=layer,
             feature=feature,
             parent=self._canvas.window(),
+            overlay_data=self._overlay_data,
         )
         self._dialog.feature_saved.connect(self._on_feature_saved)
         self._dialog.finished.connect(self._on_dialog_finished)

@@ -1,10 +1,19 @@
 """Dialogo de emissao de parecer de homologacao."""
 
-from qgis.PyQt.QtCore import Qt
+import os
+
+from qgis.PyQt.QtCore import Qt, QSize
+from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QRadioButton,
     QPlainTextEdit, QPushButton, QButtonGroup, QWidget,
 )
+
+_ICONS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "assets", "icons",
+)
+from ..icon_utils import tinted_icon
 
 
 class ParecerDialog(QDialog):
@@ -79,12 +88,14 @@ class ParecerDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        self._btn_cancel = QPushButton("Cancelar")
-        self._btn_cancel.setFixedWidth(90)
+        self._btn_cancel = QPushButton(QIcon(os.path.join(_ICONS_DIR, "action_ban.svg")), "Cancelar")
+        self._btn_cancel.setIconSize(QSize(14, 14))
+        self._btn_cancel.setFixedWidth(100)
         btn_layout.addWidget(self._btn_cancel)
 
-        self._btn_confirm = QPushButton("Confirmar")
-        self._btn_confirm.setFixedWidth(100)
+        self._btn_confirm = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_circle_check.svg"), "#FFFFFF"), "Confirmar")
+        self._btn_confirm.setIconSize(QSize(14, 14))
+        self._btn_confirm.setFixedWidth(110)
         self._btn_confirm.setStyleSheet(
             "QPushButton { background-color: #1976D2; color: white; "
             "border: none; padding: 6px 12px; border-radius: 4px; font-weight: bold; }"

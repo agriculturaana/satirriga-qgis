@@ -14,6 +14,7 @@ from qgis.PyQt.QtWidgets import (
 from qgis.core import QgsMessageLog, Qgis
 
 from ..theme import SectionHeader
+from ..icon_utils import tinted_icon
 
 from ...domain.models.enums import ZonalStatusEnum
 
@@ -51,6 +52,10 @@ class MapeamentosTab(QWidget):
         self._total_pages = 1
         self._total_items = 0
 
+        # Tracking de widgets dinâmicos nos cards
+        self._progress_labels = {}     # zonal_id -> QLabel
+        self._encerrar_buttons = {}    # zonal_id -> QPushButton
+
         # Debounce timer para busca textual
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
@@ -61,6 +66,7 @@ class MapeamentosTab(QWidget):
 
         if self._state.is_authenticated:
             self._request_page()
+            self._controller.load_notifications()
 
     # ================================================================
     # UI construction
@@ -73,12 +79,22 @@ class MapeamentosTab(QWidget):
 
         # --- Header ---
         section_header = SectionHeader("Mapeamentos", "disponíveis para edição")
-        self._refresh_btn = QPushButton("Atualizar")
-        self._refresh_btn.setFixedWidth(80)
+        self._refresh_btn = QPushButton(QIcon(os.path.join(_ICONS_DIR, "action_refresh.svg")), "Atualizar")
+        self._refresh_btn.setIconSize(QSize(14, 14))
+        self._refresh_btn.setFixedWidth(90)
         self._refresh_btn.setToolTip("Atualizar lista de mapeamentos disponíveis")
         self._refresh_btn.clicked.connect(self._on_catalogo_refresh)
         section_header.add_widget(self._refresh_btn)
         root.addWidget(section_header)
+
+        # --- Notificações (pareceres) ---
+        self._notif_container = QWidget()
+        self._notif_layout = QVBoxLayout()
+        self._notif_layout.setContentsMargins(0, 0, 0, 0)
+        self._notif_layout.setSpacing(2)
+        self._notif_container.setLayout(self._notif_layout)
+        self._notif_container.setVisible(False)
+        root.addWidget(self._notif_container)
 
         # --- Filtros ---
         root.addWidget(self._build_filters())
@@ -146,8 +162,18 @@ class MapeamentosTab(QWidget):
 
         self._filter_status = QComboBox()
         self._filter_status.addItem("Todos os status", "")
+        _ALLOWED_STATUSES = {
+            ZonalStatusEnum.CONSOLIDATED,
+            ZonalStatusEnum.CONSOLIDATION_FAILED,
+            ZonalStatusEnum.OVERLAID,
+            ZonalStatusEnum.INVALIDATED,
+            ZonalStatusEnum.HOMOLOGADO,
+            ZonalStatusEnum.REPROVADO,
+            ZonalStatusEnum.CANCELADO,
+        }
         for s in ZonalStatusEnum:
-            self._filter_status.addItem(s.label, s.value)
+            if s in _ALLOWED_STATUSES:
+                self._filter_status.addItem(s.label, s.value)
         idx = self._filter_status.findData(ZonalStatusEnum.CONSOLIDATED.value)
         if idx >= 0:
             self._filter_status.setCurrentIndex(idx)
@@ -183,9 +209,12 @@ class MapeamentosTab(QWidget):
         self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         row3.addWidget(self._sort_combo, 1)
 
+        self._icon_sort_asc = QIcon(os.path.join(_ICONS_DIR, "sort_asc.svg"))
+        self._icon_sort_desc = QIcon(os.path.join(_ICONS_DIR, "sort_desc.svg"))
         self._sort_toggle = QToolButton()
-        self._sort_toggle.setText("▲")
-        self._sort_toggle.setFixedWidth(28)
+        self._sort_toggle.setIcon(self._icon_sort_asc)
+        self._sort_toggle.setIconSize(QSize(18, 18))
+        self._sort_toggle.setFixedSize(28, 28)
         self._sort_toggle.setToolTip("Alternar ascendente/descendente")
         self._sort_toggle.setCheckable(True)
         self._sort_toggle.toggled.connect(self._on_sort_toggled)
@@ -277,7 +306,90 @@ class MapeamentosTab(QWidget):
 
         row1.addStretch()
 
-        btn = QPushButton("Baixar")
+        # --- Ações condicionais por status (mutuamente exclusivas) ---
+
+        _reprocessable = {
+            ZonalStatusEnum.FAILED.value,
+            ZonalStatusEnum.CONSOLIDATION_FAILED.value,
+        }
+        _intermediate = {"PROCESSING", "OVERLAID", "CREATED", "CONSOLIDATING"}
+        _parecer_statuses = {
+            ZonalStatusEnum.HOMOLOGADO.value,
+            ZonalStatusEnum.REPROVADO.value,
+            ZonalStatusEnum.CANCELADO.value,
+        }
+
+        is_polling = self._controller.is_polling(item.id)
+
+        if item.status in _reprocessable and not is_polling:
+            # Botão Reprocessar
+            btn_reprocess = QPushButton(
+                tinted_icon(os.path.join(_ICONS_DIR, "action_rotate_cw.svg"), "#FFFFFF"),
+                "Reprocessar",
+            )
+            btn_reprocess.setIconSize(QSize(14, 14))
+            btn_reprocess.setToolTip("Reenviar para processamento de overlay")
+            btn_reprocess.setStyleSheet(
+                "QPushButton { background-color: #FF9800; color: white;"
+                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #F57C00; }"
+            )
+            btn_reprocess.clicked.connect(
+                lambda _, zid=item.id: self._reprocess_overlay(zid)
+            )
+            row1.addWidget(btn_reprocess)
+
+        elif item.status in _intermediate or is_polling:
+            # Label de progresso inline
+            progress_text = self._progress_text_for_status(item.status)
+            lbl_progress = QLabel(progress_text)
+            lbl_progress.setStyleSheet(
+                "font-size: 10px; font-style: italic; color: #FF9800;"
+                " padding: 2px 6px;"
+            )
+            row1.addWidget(lbl_progress)
+            self._progress_labels[item.id] = lbl_progress
+
+        elif item.status == ZonalStatusEnum.CONSOLIDATED.value:
+            # Botão Encerrar para Homologação
+            btn_encerrar = QPushButton(
+                tinted_icon(os.path.join(_ICONS_DIR, "action_check.svg"), "#FFFFFF"),
+                "Encerrar",
+            )
+            btn_encerrar.setIconSize(QSize(14, 14))
+            btn_encerrar.setToolTip("Enviar para homologação")
+            btn_encerrar.setStyleSheet(
+                "QPushButton { background-color: #2E7D32; color: white;"
+                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #1B5E20; }"
+                "QPushButton:disabled { background-color: #A5D6A7; color: #E8F5E9; }"
+            )
+            btn_encerrar.clicked.connect(
+                lambda _, zid=item.id: self._finalizar_zonal(zid)
+            )
+            row1.addWidget(btn_encerrar)
+            self._encerrar_buttons[item.id] = btn_encerrar
+
+        elif item.status in _parecer_statuses and item.mapeamento_id:
+            # Botão Ver Parecer
+            btn_parecer = QPushButton(
+                tinted_icon(os.path.join(_ICONS_DIR, "action_info.svg"), "#FFFFFF"),
+                "Parecer",
+            )
+            btn_parecer.setIconSize(QSize(14, 14))
+            btn_parecer.setToolTip("Visualizar pareceres deste mapeamento")
+            btn_parecer.setStyleSheet(
+                "QPushButton { background-color: #7B1FA2; color: white;"
+                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #6A1B9A; }"
+            )
+            btn_parecer.clicked.connect(
+                lambda _, mid=item.mapeamento_id: self._on_view_parecer(mid)
+            )
+            row1.addWidget(btn_parecer)
+
+        btn = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_download.svg"), "#FFFFFF"), "Baixar")
+        btn.setIconSize(QSize(14, 14))
         btn.setToolTip("Baixar resultado zonal como GeoPackage editável")
         btn.setStyleSheet(
             "QPushButton { background-color: #1976D2; color: white;"
@@ -285,6 +397,19 @@ class MapeamentosTab(QWidget):
             "QPushButton:hover { background-color: #1565C0; }"
             "QPushButton:disabled { background-color: #90CAF9; }"
         )
+
+        # Desabilitar download para status não-baixáveis
+        _downloadable = {
+            ZonalStatusEnum.CONSOLIDATED.value,
+            ZonalStatusEnum.DONE.value,
+            ZonalStatusEnum.AGUARDANDO.value,
+            ZonalStatusEnum.HOMOLOGADO.value,
+            ZonalStatusEnum.REPROVADO.value,
+        }
+        if item.status not in _downloadable:
+            btn.setEnabled(False)
+            btn.setToolTip(f"Download indisponível (status: {status_text})")
+
         row1.addWidget(btn)
 
         layout.addLayout(row1)
@@ -408,14 +533,21 @@ class MapeamentosTab(QWidget):
         self._state.error_occurred.connect(self._on_error)
         self._state.auth_state_changed.connect(self._on_auth_changed)
         self._state.catalogo_changed.connect(self._on_catalogo_changed)
+        self._state.reprocess_overlay_done.connect(self._on_reprocess_done)
+        self._state.zonal_status_polled.connect(self._on_zonal_status_polled)
+        self._state.zonal_finalizado.connect(self._on_zonal_finalizado)
+        self._controller.notifications_loaded.connect(self._on_notifications_loaded)
+        self._controller.pareceres_loaded.connect(self._on_pareceres_loaded)
 
     def _on_catalogo_refresh(self):
         self._request_page()
+        self._controller.load_notifications()
 
     def _on_auth_changed(self, is_authenticated):
         if is_authenticated:
             self._current_page = 1
             self._request_page()
+            self._controller.load_notifications()
         else:
             self._card_list.clear()
             self._update_pagination_controls()
@@ -436,6 +568,15 @@ class MapeamentosTab(QWidget):
         sort_field = _SORT_OPTIONS[sort_index][1]
         sort_direction = "desc" if self._sort_toggle.isChecked() else "asc"
 
+        # Homologadores veem consolidados de todos; demais veem apenas os próprios
+        is_homologador = (
+            getattr(self._state.user, "is_homologador", False)
+            if self._state.user else False
+        )
+        if not is_homologador:
+            if not author and self._state.user:
+                author = self._state.user.name or ""
+
         self._controller.load_catalogo(
             page=self._current_page,
             size=_PAGE_SIZE,
@@ -446,6 +587,7 @@ class MapeamentosTab(QWidget):
             descricao=descricao,
             sort=sort_field,
             direction=sort_direction,
+            only_mine=not is_homologador,
         )
 
     # ================================================================
@@ -454,6 +596,8 @@ class MapeamentosTab(QWidget):
 
     def _on_catalogo_changed(self, items, pagination):
         """Recebe página de CatalogoItems + metadados de paginação."""
+        self._progress_labels.clear()
+        self._encerrar_buttons.clear()
         self._card_list.clear()
 
         # Atualizar estado de paginação
@@ -505,7 +649,7 @@ class MapeamentosTab(QWidget):
         self._request_page()
 
     def _on_sort_toggled(self, checked):
-        self._sort_toggle.setText("▼" if checked else "▲")
+        self._sort_toggle.setIcon(self._icon_sort_desc if checked else self._icon_sort_asc)
         self._current_page = 1
         self._request_page()
 
@@ -540,16 +684,169 @@ class MapeamentosTab(QWidget):
     def _format_metodo(metodo_apply):
         """Converte metodoApply em label legível."""
         labels = {
-            "METODO_1": "Método 1",
-            "METODO_2_DISCRETO": "Método 2a (Discreto)",
-            "METODO_2_FUZZY": "Método 2b (Fuzzy)",
+            "METODO_1": "Fatiamento do índice de Vegetação",
+            "METODO_2_DISCRETO": "Detecção de mudança (discreto)",
+            "METODO_2_FUZZY": "Detecção de mudança (fuzzy)",
             "METODO_3": "Método 3",
+            "AUTOMATICO": "Automático",
         }
         return labels.get(metodo_apply, metodo_apply)
 
+    def _on_notifications_loaded(self, notifications):
+        """Exibe notificações de pareceres acima do catálogo."""
+        # Limpa notificações anteriores
+        while self._notif_layout.count():
+            child = self._notif_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # Filtra apenas não lidas
+        unread = [n for n in notifications if not n.get("lida", True)]
+        if not unread:
+            self._notif_container.setVisible(False)
+            return
+
+        _NOTIF_STYLES = {
+            "MAPEAMENTO_HOMOLOGADO": ("#E8F5E9", "#2E7D32", "Aprovado"),
+            "MAPEAMENTO_REPROVADO": ("#FFEBEE", "#C62828", "Reprovado"),
+            "MAPEAMENTO_DEVOLVIDO": ("#FFF3E0", "#E65100", "Devolvido"),
+            "MAPEAMENTO_CANCELADO": ("#EFEBE9", "#4E342E", "Cancelado"),
+        }
+
+        for notif in unread[:5]:  # máximo 5 notificações visíveis
+            tipo = notif.get("tipo", "")
+            payload = notif.get("payload") or {}
+            notif_id = notif.get("id")
+            style = _NOTIF_STYLES.get(tipo, ("#E3F2FD", "#1565C0", tipo))
+
+            mapeamento_id = payload.get("mapeamentoId", "?")
+            revisor = payload.get("revisorNome", "")
+            motivo = payload.get("motivo", "")
+            decisao_label = style[2]
+
+            text = f"<b>#{mapeamento_id} — {decisao_label}</b>"
+            if revisor:
+                text += f" por {revisor}"
+            if motivo:
+                text += f"<br/><i>{motivo[:120]}</i>"
+
+            card = QWidget()
+            card_layout = QHBoxLayout()
+            card_layout.setContentsMargins(8, 4, 8, 4)
+
+            lbl = QLabel(text)
+            lbl.setWordWrap(True)
+            lbl.setTextFormat(Qt.RichText)
+            lbl.setStyleSheet(f"font-size: 11px; color: {style[1]}; border: none; background: transparent;")
+            card_layout.addWidget(lbl, 1)
+
+            btn_dismiss = QPushButton("✕")
+            btn_dismiss.setFixedSize(20, 20)
+            btn_dismiss.setToolTip("Marcar como lida")
+            btn_dismiss.setStyleSheet(
+                f"border: none; color: {style[1]}; font-size: 12px; font-weight: bold; background: transparent;"
+            )
+            btn_dismiss.clicked.connect(
+                lambda _, nid=notif_id: self._dismiss_notification(nid)
+            )
+            card_layout.addWidget(btn_dismiss)
+
+            card.setLayout(card_layout)
+            card.setStyleSheet(
+                f"background-color: {style[0]}; border-radius: 4px; "
+                f"border-left: 3px solid {style[1]};"
+            )
+            self._notif_layout.addWidget(card)
+
+        self._notif_container.setVisible(True)
+
+    def _dismiss_notification(self, notif_id):
+        """Marca notificação como lida e remove do painel."""
+        if notif_id:
+            self._controller.mark_notification_read(notif_id)
+        # Recarrega notificações
+        self._controller.load_notifications()
+
     def _on_zonal_download_clicked(self, zonal_id, catalogo_item=None):
-        """Inicia download do resultado zonal."""
-        self._controller.download_zonal_result(zonal_id, catalogo_item=catalogo_item)
+        """Inicia download do resultado zonal.
+
+        Status finais irreversíveis são baixados em modo somente leitura.
+        REPROVADO permite edição (checkout) para correção pelo dono/homologador.
+        """
+        _READ_ONLY_STATUSES = {
+            ZonalStatusEnum.AGUARDANDO.value,
+            ZonalStatusEnum.HOMOLOGADO.value,
+            ZonalStatusEnum.CANCELADO.value,
+        }
+        read_only = (
+            catalogo_item is not None
+            and catalogo_item.status in _READ_ONLY_STATUSES
+        )
+        self._controller.download_zonal_result(
+            zonal_id, catalogo_item=catalogo_item, read_only=read_only,
+        )
+
+    def _reprocess_overlay(self, zonal_id):
+        """Dispara reprocessamento de overlay para zonal com falha."""
+        self._controller.reprocess_overlay(zonal_id)
+
+    def _on_reprocess_done(self, zonal_id, message):
+        """Callback após reprocessamento disparado — recarrega catálogo para mostrar progresso."""
+        QgsMessageLog.logMessage(
+            f"[Reprocess] Zonal #{zonal_id}: {message}", PLUGIN_NAME, Qgis.Info,
+        )
+        self._request_page()
+
+    def _on_zonal_status_polled(self, zonal_id, status):
+        """Atualiza label de progresso inline quando polling retorna novo status."""
+        lbl = self._progress_labels.get(zonal_id)
+        if lbl is not None:
+            try:
+                lbl.setText(self._progress_text_for_status(status))
+            except RuntimeError:
+                # Widget C++ já destruído
+                self._progress_labels.pop(zonal_id, None)
+                return
+
+        # Status terminal: refresh para recriar card com widget correto
+        _intermediate = {"PROCESSING", "OVERLAID", "CREATED", "CONSOLIDATING"}
+        if status not in _intermediate:
+            self._request_page()
+
+    def _on_zonal_finalizado(self, zonal_id, new_status):
+        """Callback após finalizar zonal para homologação."""
+        from qgis.PyQt.QtWidgets import QMessageBox
+        QMessageBox.information(
+            self, "Mapeamento encerrado",
+            f"Zonal #{zonal_id} encerrado para homologação.\n"
+            f"Novo status: {new_status}",
+        )
+        self._request_page()
+
+    def _finalizar_zonal(self, zonal_id):
+        """Envia zonal para homologação."""
+        self._controller.finalizar_zonal(zonal_id)
+
+    @staticmethod
+    def _progress_text_for_status(status):
+        """Retorna texto de progresso para exibição inline."""
+        _texts = {
+            "PROCESSING": "Processando overlay...",
+            "OVERLAID": "Recalculando estatísticas...",
+            "CONSOLIDATING": "Consolidando...",
+            "CREATED": "Aguardando processamento...",
+        }
+        return _texts.get(status, "Processando...")
+
+    def _on_view_parecer(self, mapeamento_id):
+        """Solicita histórico de pareceres ao servidor."""
+        self._controller.load_pareceres(mapeamento_id)
+
+    def _on_pareceres_loaded(self, mapeamento_id, pareceres):
+        """Exibe dialog com histórico de pareceres."""
+        from ..dialogs.parecer_detail_dialog import ParecerDetailDialog
+        dialog = ParecerDetailDialog(mapeamento_id, pareceres, parent=self)
+        dialog.exec_()
 
     # ================================================================
     # Loading / Error
@@ -578,3 +875,15 @@ class MapeamentosTab(QWidget):
             self._status_label.setText(f"Erro: {message}")
             self._status_label.setStyleSheet("color: #F44336; font-size: 11px;")
             self._status_label.setVisible(True)
+        elif operation == "reprocess":
+            from qgis.PyQt.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self, "Erro ao reprocessar",
+                f"Não foi possível iniciar o reprocessamento:\n\n{message}",
+            )
+        elif operation == "finalizar_zonal":
+            from qgis.PyQt.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self, "Erro ao encerrar",
+                f"Não foi possível encerrar o zonal:\n\n{message}",
+            )

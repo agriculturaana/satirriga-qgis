@@ -31,7 +31,7 @@ class TestSyncStatusEnum:
 
     def test_all_values(self):
         values = {e.value for e in SyncStatusEnum}
-        assert values == {"DOWNLOADED", "MODIFIED", "UPLOADED", "NEW"}
+        assert values == {"DOWNLOADED", "MODIFIED", "UPLOADED", "NEW", "DELETED"}
 
 
 class TestZonalStatusEnum:

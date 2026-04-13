@@ -96,8 +96,8 @@ class TestBuildHierarchyDirect:
             band_keys = [b.band_key for b in h.dates[0].bands]
             assert band_keys == ALL_BAND_KEYS, f"Falhou para metodo={metodo}"
 
-    def test_urls_are_simple_band_only(self):
-        """URLs diretas devem conter apenas ?band=X, sem min/max/palette."""
+    def test_urls_contain_vis_params(self):
+        """URLs diretas incluem parametros de visualizacao (min/max/gamma/palette)."""
         tile_data = [_make_tile(image_id="MY_IMG")]
         h = build_raster_hierarchy(tile_data, "RANDOM_FOREST")
 
@@ -105,9 +105,9 @@ class TestBuildHierarchyDirect:
             for layer in band.layers:
                 assert layer.xyz_url.startswith(_JOBS_BASE)
                 assert "MY_IMG" in layer.xyz_url
-                assert f"?band={band.band_key}" in layer.xyz_url
-                # Nao deve conter & (parametros extras) — servidor aplica defaults
-                assert "&" not in layer.xyz_url
+                assert f"band={band.band_key}" in layer.xyz_url
+                # URLs diretas agora incluem params de visualizacao
+                assert "&" in layer.xyz_url
 
     def test_image_id_and_vis_params_preserved(self):
         tile_data = [_make_tile(image_id="MY_IMAGE")]
@@ -171,7 +171,7 @@ class TestBuildHierarchyLegacy:
         band_keys = [b.band_key for b in h.dates[0].bands]
         assert "original" in band_keys
         assert "NDVI" in band_keys
-        assert "classIrri" in band_keys
+        assert "classIrri" not in band_keys  # classIrri removido
 
     def test_legacy_unknown_metodo_only_rgb(self):
         """Legado sem indices: apenas RGB."""
@@ -236,9 +236,10 @@ class TestBuildXyzUrl:
         url = build_xyz_url("IMG123", params)
         assert url.startswith(f"{_JOBS_BASE}/IMG123/")
         assert "band=NDVI" in url
-        assert "min=-1" in url
-        assert "max=1" in url
-        assert "palette=NDVI" in url
+        # Defaults hardcoded: min=0, max=0.8, palette=RDYLGN
+        assert "min=0" in url
+        assert "max=0.8" in url
+        assert "palette=RDYLGN" in url
 
     def test_original_with_gamma(self):
         params = get_default_vis_params("original")
@@ -255,8 +256,9 @@ class TestBuildXyzUrl:
         url = build_xyz_url("IMG_X", params)
         assert "min=-0.5" in url
         assert "max=0.8" in url
-        assert "gamma=1.5" in url
+        # GEE: palette e gamma sao mutuamente exclusivos; palette tem prioridade
         assert "palette=VIRIDIS" in url
+        assert "gamma" not in url
 
     def test_optional_params_omitted(self):
         params = VisParams(band="original")
@@ -282,5 +284,5 @@ class TestBackwardCompat:
 
         assert isinstance(configs, list)
         assert all(hasattr(c, "xyz_url") for c in configs)
-        # 2 tiles × 6 bandas (todas, pois tem image_id) = 12
-        assert len(configs) == 12
+        # 2 tiles × 4 bandas (original, NDVI, NDWI, albedo) = 8
+        assert len(configs) == 8

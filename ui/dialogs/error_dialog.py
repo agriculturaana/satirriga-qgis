@@ -1,10 +1,19 @@
 """Dialog de erro/aviso para feedback intuitivo ao usuario."""
 
-from qgis.PyQt.QtCore import Qt
+import os
+
+from qgis.PyQt.QtCore import Qt, QSize
+from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QWidget,
 )
+
+_ICONS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "assets", "icons",
+)
+from ..icon_utils import tinted_icon
 
 # Mapeamento operacao -> titulo legivel
 _OPERATION_LABELS = {
@@ -94,7 +103,8 @@ class ErrorDialog(QDialog):
         layout.addWidget(sep)
 
         # --- Detalhes expandiveis ---
-        self._toggle_btn = QPushButton("Mostrar detalhes")
+        self._toggle_btn = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_info.svg"), "#1976D2"), "Mostrar detalhes")
+        self._toggle_btn.setIconSize(QSize(14, 14))
         self._toggle_btn.setFlat(True)
         self._toggle_btn.setStyleSheet(
             "QPushButton { color: #1976D2; font-size: 11px; text-align: left; "

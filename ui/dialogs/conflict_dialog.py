@@ -1,11 +1,20 @@
 """Dialog de resolucao de conflitos de upload zonal."""
 
-from qgis.PyQt.QtCore import Qt, pyqtSignal
+import os
+
+from qgis.PyQt.QtCore import Qt, QSize, pyqtSignal
+from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QComboBox, QDialogButtonBox,
 )
+
+_ICONS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "assets", "icons",
+)
+from ..icon_utils import tinted_icon
 
 from ...domain.models.conflict import ConflictSet
 from ...domain.models.enums import ConflictResolutionEnum
@@ -100,7 +109,8 @@ class ConflictResolutionDialog(QDialog):
         # Botoes em lote
         batch_layout = QHBoxLayout()
 
-        btn_all_mine = QPushButton("Aceitar Todas Minhas")
+        btn_all_mine = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_check.svg"), "#FFFFFF"), "Aceitar Todas Minhas")
+        btn_all_mine.setIconSize(QSize(14, 14))
         btn_all_mine.setToolTip("Resolver todos os conflitos mantendo suas alterações locais")
         btn_all_mine.setStyleSheet(
             "QPushButton { background-color: #FF9800; color: white; "
@@ -110,7 +120,8 @@ class ConflictResolutionDialog(QDialog):
         btn_all_mine.clicked.connect(self._set_all_mine)
         batch_layout.addWidget(btn_all_mine)
 
-        btn_all_theirs = QPushButton("Aceitar Todas Servidor")
+        btn_all_theirs = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_download.svg"), "#FFFFFF"), "Aceitar Todas Servidor")
+        btn_all_theirs.setIconSize(QSize(14, 14))
         btn_all_theirs.setToolTip("Resolver todos os conflitos mantendo a versão do servidor")
         btn_all_theirs.setStyleSheet(
             "QPushButton { background-color: #2196F3; color: white; "
@@ -127,7 +138,8 @@ class ConflictResolutionDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        btn_cancel = QPushButton("Cancelar Upload")
+        btn_cancel = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_ban.svg"), "#FFFFFF"), "Cancelar Upload")
+        btn_cancel.setIconSize(QSize(14, 14))
         btn_cancel.setToolTip("Cancelar upload e descartar resoluções")
         btn_cancel.setStyleSheet(
             "QPushButton { background-color: #F44336; color: white; "
@@ -137,7 +149,8 @@ class ConflictResolutionDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_cancel)
 
-        btn_apply = QPushButton("Aplicar")
+        btn_apply = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_circle_check.svg"), "#FFFFFF"), "Aplicar")
+        btn_apply.setIconSize(QSize(14, 14))
         btn_apply.setToolTip("Enviar resoluções de conflitos ao servidor")
         btn_apply.setStyleSheet(
             "QPushButton { background-color: #4CAF50; color: white; "

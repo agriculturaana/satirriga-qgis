@@ -1,11 +1,20 @@
 """Header de sessao — exibe usuario logado (clicavel -> popup) ou botao de login."""
 
-from qgis.PyQt.QtCore import Qt
+import os
+
+from qgis.PyQt.QtCore import Qt, QSize
+from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
 )
 
+_ICONS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+    "assets", "icons",
+)
+
 from .session_popup import SessionPopup
+from ..icon_utils import tinted_icon
 
 
 class SessionHeader(QWidget):
@@ -28,7 +37,8 @@ class SessionHeader(QWidget):
         layout.setSpacing(4)
 
         # Login button
-        self._login_btn = QPushButton("Entrar")
+        self._login_btn = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_log_in.svg"), "#FFFFFF"), "Entrar")
+        self._login_btn.setIconSize(QSize(14, 14))
         self._login_btn.setFixedHeight(24)
         self._login_btn.setToolTip("Autenticar via SSO (Keycloak)")
         self._login_btn.setCursor(Qt.PointingHandCursor)

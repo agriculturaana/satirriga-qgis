@@ -21,7 +21,8 @@ class DownloadZonalTask(SatIrrigaTask):
     """Checkout + download FlatGeobuf + conversao para GPKG com campos V2."""
 
     def __init__(self, checkout_url, download_url, access_token,
-                 gpkg_output_path, zonal_id, catalogo_meta=None):
+                 gpkg_output_path, zonal_id, catalogo_meta=None,
+                 read_only=False):
         super().__init__(f"Download zonal {zonal_id}")
         self._checkout_url = checkout_url
         self._download_url = download_url
@@ -29,6 +30,7 @@ class DownloadZonalTask(SatIrrigaTask):
         self._gpkg_path = gpkg_output_path
         self._zonal_id = zonal_id
         self._catalogo_meta = catalogo_meta or {}
+        self._read_only = read_only
 
     def _validate_existing_gpkg(self, gpkg_path, expected_count):
         """Verifica se GPKG existente tem features e geometrias validas.
@@ -81,44 +83,71 @@ class DownloadZonalTask(SatIrrigaTask):
             headers = {"Authorization": f"Bearer {self._token}"}
 
             # ----------------------------------------------------------
-            # 1. Checkout (5-15%)
+            # 1. Checkout (5-15%) — pulado em modo somente leitura
             # ----------------------------------------------------------
-            self.signals.status_message.emit("Realizando checkout...")
-            self.setProgress(5)
+            edit_token = ""
+            zonal_version = 0
+            feature_count = 0
+            snapshot_hash = ""
+            expires_at = ""
 
-            self._log(f"[HTTP] POST {self._checkout_url} (auth=True)")
-            checkout_resp = requests.post(
-                self._checkout_url, headers=headers, timeout=30,
-            )
-            self._log(
-                f"[HTTP] {checkout_resp.status_code} {self._checkout_url}"
-            )
-            if checkout_resp.status_code == 409:
-                try:
-                    err_body = checkout_resp.json()
-                    if err_body.get("error") == "EM_EDICAO":
-                        usuario = err_body.get("usuario", "outro usuário")
-                        desde = err_body.get("desde", "")
-                        err_msg = (
-                            f"Este mapeamento está sendo editado por {usuario}"
-                            f"{' desde ' + desde[:10] if desde else ''}."
+            if self._read_only:
+                self.signals.status_message.emit("Baixando (somente leitura)...")
+                self.setProgress(15)
+                self._log(f"[Download] Modo somente leitura — checkout ignorado")
+            else:
+                self.signals.status_message.emit("Realizando checkout...")
+                self.setProgress(5)
+
+                self._log(f"[HTTP] POST {self._checkout_url} (auth=True)")
+                checkout_resp = requests.post(
+                    self._checkout_url, headers=headers, timeout=30,
+                )
+                self._log(
+                    f"[HTTP] {checkout_resp.status_code} {self._checkout_url}"
+                )
+                if checkout_resp.status_code == 403:
+                    try:
+                        err_body = checkout_resp.json()
+                        server_msg = err_body.get("message", "")
+                        self._log(
+                            f"[Download] 403 Forbidden - {server_msg or checkout_resp.text[:200]}"
                         )
-                    else:
-                        err_msg = err_body.get("message", "Zonal bloqueado (409)")
-                except Exception:
-                    err_msg = "Zonal bloqueado (409)"
-                self._exception = Exception(err_msg)
-                return False
-            checkout_resp.raise_for_status()
+                    except Exception:
+                        server_msg = checkout_resp.text[:200]
+                        self._log(f"[Download] 403 Forbidden - {server_msg}")
+                    self._exception = Exception(
+                        server_msg
+                        or "Acesso negado ao checkout. Verifique suas permissões."
+                    )
+                    return False
 
-            checkout_data = checkout_resp.json()
-            edit_token = checkout_data["editToken"]
-            zonal_version = checkout_data["zonalVersion"]
-            feature_count = checkout_data.get("featureCount", 0)
-            snapshot_hash = checkout_data.get("snapshotHash", "")
-            expires_at = checkout_data.get("expiresAt", "")
+                if checkout_resp.status_code == 409:
+                    try:
+                        err_body = checkout_resp.json()
+                        if err_body.get("error") == "EM_EDICAO":
+                            usuario = err_body.get("usuario", "outro usuário")
+                            desde = err_body.get("desde", "")
+                            err_msg = (
+                                f"Este mapeamento está sendo editado por {usuario}"
+                                f"{' desde ' + desde[:10] if desde else ''}."
+                            )
+                        else:
+                            err_msg = err_body.get("message", "Zonal bloqueado (409)")
+                    except Exception:
+                        err_msg = "Zonal bloqueado (409)"
+                    self._exception = Exception(err_msg)
+                    return False
+                checkout_resp.raise_for_status()
 
-            self.setProgress(15)
+                checkout_data = checkout_resp.json()
+                edit_token = checkout_data["editToken"]
+                zonal_version = checkout_data["zonalVersion"]
+                feature_count = checkout_data.get("featureCount", 0)
+                snapshot_hash = checkout_data.get("snapshotHash", "")
+                expires_at = checkout_data.get("expiresAt", "")
+
+                self.setProgress(15)
 
             if self.isCanceled():
                 return False
@@ -419,6 +448,7 @@ class DownloadZonalTask(SatIrrigaTask):
                 "expiresAt": expires_at,
                 "etag": response_etag,
                 "downloadedAt": now_iso,
+                "readOnly": self._read_only,
             }
             # Dados enriquecidos do catalogo
             if self._catalogo_meta:

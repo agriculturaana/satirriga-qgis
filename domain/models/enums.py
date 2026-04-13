@@ -47,6 +47,7 @@ class SyncStatusEnum(str, Enum):
     MODIFIED = "MODIFIED"
     UPLOADED = "UPLOADED"
     NEW = "NEW"
+    DELETED = "DELETED"
 
 
 class ZonalStatusEnum(str, Enum):
@@ -57,6 +58,7 @@ class ZonalStatusEnum(str, Enum):
     CONSOLIDATING = "CONSOLIDATING"
     CONSOLIDATED = "CONSOLIDATED"
     CONSOLIDATION_FAILED = "CONSOLIDATION_FAILED"
+    OVERLAID = "OVERLAID"
     INVALIDATED = "INVALIDATED"
     AGUARDANDO = "AGUARDANDO"
     HOMOLOGADO = "HOMOLOGADO"
@@ -73,6 +75,7 @@ class ZonalStatusEnum(str, Enum):
             self.CONSOLIDATING: "Consolidando",
             self.CONSOLIDATED: "Consolidado",
             self.CONSOLIDATION_FAILED: "Falha na consolidação",
+            self.OVERLAID: "Overlay concluído",
             self.INVALIDATED: "Invalidado",
             self.AGUARDANDO: "Aguardando",
             self.HOMOLOGADO: "Homologado",
@@ -90,6 +93,7 @@ class ZonalStatusEnum(str, Enum):
             self.CONSOLIDATING: "#2196F3",
             self.CONSOLIDATED: "#1B5E20",
             self.CONSOLIDATION_FAILED: "#B71C1C",
+            self.OVERLAID: "#42A5F5",
             self.INVALIDATED: "#795548",
             self.AGUARDANDO: "#FFC107",
             self.HOMOLOGADO: "#2E7D32",

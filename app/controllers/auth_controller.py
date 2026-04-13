@@ -98,7 +98,8 @@ class AuthController(QObject):
             try:
                 token_data = json.loads(body)
                 claims = self._token_store.store_tokens(token_data)
-                user = UserInfo.from_jwt_claims(claims, self._get_resource_id())
+                resource_id = self._get_resource_id()
+                user = UserInfo.from_jwt_claims(claims, resource_id)
 
                 self._start_session_manager()
 
