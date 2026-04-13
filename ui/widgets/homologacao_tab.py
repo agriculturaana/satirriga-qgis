@@ -8,7 +8,7 @@ from qgis.PyQt.QtGui import QColor, QIcon, QTextDocument, QFontMetrics
 from qgis.PyQt.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QLineEdit,
     QLabel, QListWidget, QListWidgetItem, QFrame, QSizePolicy,
-    QGraphicsDropShadowEffect, QMessageBox,
+    QGraphicsDropShadowEffect, QMessageBox, QToolButton,
 )
 
 _ICONS_DIR = os.path.join(
@@ -22,7 +22,18 @@ from ..theme import SectionHeader
 
 from ...domain.models.enums import ZonalStatusEnum
 from ...infra.config.settings import PLUGIN_NAME
+from ..icon_utils import tinted_icon
 
+
+# Opções de ordenação: label exibido → campo da API
+_SORT_OPTIONS = [
+    ("#ID", "mapeamentoId"),
+    ("Data", "dataReferencia"),
+    ("Autor", "author"),
+    ("Descrição", "descricao"),
+    ("Status", "status"),
+    ("Editado em", "processedAt"),
+]
 
 # Filtros de status disponíveis
 _STATUS_FILTERS = {
@@ -64,8 +75,9 @@ class HomologacaoTab(QWidget):
 
         # Header
         section_header = SectionHeader("Homologação", "mapeamentos")
-        self._refresh_btn = QPushButton("Atualizar")
-        self._refresh_btn.setFixedWidth(80)
+        self._refresh_btn = QPushButton(QIcon(os.path.join(_ICONS_DIR, "action_refresh.svg")), "Atualizar")
+        self._refresh_btn.setIconSize(QSize(14, 14))
+        self._refresh_btn.setFixedWidth(90)
         self._refresh_btn.clicked.connect(self._load_data)
         section_header.add_widget(self._refresh_btn)
         layout.addWidget(section_header)
@@ -107,6 +119,34 @@ class HomologacaoTab(QWidget):
         filter_row2.addWidget(self._status_filter, 1)
 
         layout.addLayout(filter_row2)
+
+        # Ordenação
+        sort_row = QHBoxLayout()
+        sort_row.setSpacing(4)
+
+        sort_label = QLabel("Ordenar:")
+        sort_label.setStyleSheet("font-size: 11px; color: #757575;")
+        sort_row.addWidget(sort_label)
+
+        self._sort_combo = QComboBox()
+        for label, _field in _SORT_OPTIONS:
+            self._sort_combo.addItem(label)
+        self._sort_combo.setCurrentIndex(0)
+        self._sort_combo.currentIndexChanged.connect(self._on_sort_changed)
+        sort_row.addWidget(self._sort_combo, 1)
+
+        self._icon_sort_asc = QIcon(os.path.join(_ICONS_DIR, "sort_asc.svg"))
+        self._icon_sort_desc = QIcon(os.path.join(_ICONS_DIR, "sort_desc.svg"))
+        self._sort_toggle = QToolButton()
+        self._sort_toggle.setIcon(self._icon_sort_asc)
+        self._sort_toggle.setIconSize(QSize(18, 18))
+        self._sort_toggle.setFixedSize(28, 28)
+        self._sort_toggle.setToolTip("Alternar ascendente/descendente")
+        self._sort_toggle.setCheckable(True)
+        self._sort_toggle.toggled.connect(self._on_sort_toggled)
+        sort_row.addWidget(self._sort_toggle)
+
+        layout.addLayout(sort_row)
 
         # Lista de cards
         self._card_list = QListWidget()
@@ -302,12 +342,58 @@ class HomologacaoTab(QWidget):
 
         layout.addLayout(row4)
 
-        # --- Linha 5: ações ---
-        row5 = QHBoxLayout()
-        row5.setSpacing(4)
-        row5.addStretch()
+        # --- Linha 5: ações de homologação ---
+        if item.status == "AGUARDANDO":
+            row_actions = QHBoxLayout()
+            row_actions.setSpacing(4)
+            row_actions.addStretch()
 
-        btn_download = QPushButton("Baixar")
+            btn_aprovar = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_check.svg"), "#FFFFFF"), "Aprovar")
+            btn_aprovar.setIconSize(QSize(14, 14))
+            btn_aprovar.setStyleSheet(
+                "QPushButton { background-color: #2E7D32; color: white;"
+                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #1B5E20; }"
+            )
+            btn_aprovar.clicked.connect(
+                lambda _, zid=item.id: self._on_parecer(zid)
+            )
+            row_actions.addWidget(btn_aprovar)
+
+            btn_devolver = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_undo.svg"), "#FFFFFF"), "Devolver")
+            btn_devolver.setIconSize(QSize(14, 14))
+            btn_devolver.setToolTip("Devolver para edição — retorna ao editor com orientações")
+            btn_devolver.setStyleSheet(
+                "QPushButton { background-color: #1565C0; color: white;"
+                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #0D47A1; }"
+            )
+            btn_devolver.clicked.connect(
+                lambda _, zid=item.id: self._on_devolver(zid)
+            )
+            row_actions.addWidget(btn_devolver)
+
+            btn_reprovar = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_x.svg"), "#FFFFFF"), "Reprovar")
+            btn_reprovar.setIconSize(QSize(14, 14))
+            btn_reprovar.setStyleSheet(
+                "QPushButton { background-color: #C62828; color: white;"
+                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #B71C1C; }"
+            )
+            btn_reprovar.clicked.connect(
+                lambda _, zid=item.id: self._on_parecer(zid)
+            )
+            row_actions.addWidget(btn_reprovar)
+
+            layout.addLayout(row_actions)
+
+        # --- Linha 6: ações secundárias (Baixar, Retirar, Excluir) ---
+        row_secondary = QHBoxLayout()
+        row_secondary.setSpacing(4)
+        row_secondary.addStretch()
+
+        btn_download = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_download.svg"), "#FFFFFF"), "Baixar")
+        btn_download.setIconSize(QSize(14, 14))
         btn_download.setToolTip("Baixar resultado zonal como GeoPackage editável")
         btn_download.setStyleSheet(
             "QPushButton { background-color: #1976D2; color: white;"
@@ -318,45 +404,11 @@ class HomologacaoTab(QWidget):
         btn_download.clicked.connect(
             lambda _, zid=item.id, ci=item: self._on_download(zid, ci)
         )
-        row5.addWidget(btn_download)
+        row_secondary.addWidget(btn_download)
 
-        if item.status == "AGUARDANDO":
-            btn_aprovar = QPushButton("Aprovar")
-            btn_aprovar.setStyleSheet(
-                "QPushButton { background-color: #2E7D32; color: white;"
-                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
-                "QPushButton:hover { background-color: #1B5E20; }"
-            )
-            btn_aprovar.clicked.connect(
-                lambda _, zid=item.id: self._on_parecer(zid)
-            )
-            row5.addWidget(btn_aprovar)
-
-            btn_devolver = QPushButton("Devolver")
-            btn_devolver.setToolTip("Devolver para edição — retorna ao editor com orientações")
-            btn_devolver.setStyleSheet(
-                "QPushButton { background-color: #1565C0; color: white;"
-                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
-                "QPushButton:hover { background-color: #0D47A1; }"
-            )
-            btn_devolver.clicked.connect(
-                lambda _, zid=item.id: self._on_devolver(zid)
-            )
-            row5.addWidget(btn_devolver)
-
-            btn_reprovar = QPushButton("Reprovar")
-            btn_reprovar.setStyleSheet(
-                "QPushButton { background-color: #C62828; color: white;"
-                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
-                "QPushButton:hover { background-color: #B71C1C; }"
-            )
-            btn_reprovar.clicked.connect(
-                lambda _, zid=item.id: self._on_parecer(zid)
-            )
-            row5.addWidget(btn_reprovar)
-
-        elif item.status == "HOMOLOGADO":
-            btn_retirar = QPushButton("Retirar")
+        if item.status == "HOMOLOGADO":
+            btn_retirar = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_rotate_ccw.svg"), "#FFFFFF"), "Retirar")
+            btn_retirar.setIconSize(QSize(14, 14))
             btn_retirar.setToolTip("Retirar homologação — reverte para reanálise")
             btn_retirar.setStyleSheet(
                 "QPushButton { background-color: #E65100; color: white;"
@@ -366,11 +418,11 @@ class HomologacaoTab(QWidget):
             btn_retirar.clicked.connect(
                 lambda _, zid=item.id: self._on_retirar(zid)
             )
-            row5.addWidget(btn_retirar)
+            row_secondary.addWidget(btn_retirar)
 
-        # Suprimir mapeamento (visível para homologadores em qualquer status)
         if item.mapeamento_id:
-            btn_suprimir = QPushButton("Suprimir")
+            btn_suprimir = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_trash.svg"), "#FFFFFF"), "Excluir")
+            btn_suprimir.setIconSize(QSize(14, 14))
             btn_suprimir.setToolTip("Excluir mapeamento definitivamente")
             btn_suprimir.setStyleSheet(
                 "QPushButton { background-color: #7B1FA2; color: white;"
@@ -380,9 +432,9 @@ class HomologacaoTab(QWidget):
             btn_suprimir.clicked.connect(
                 lambda _, mid=item.mapeamento_id: self._on_suprimir(mid)
             )
-            row5.addWidget(btn_suprimir)
+            row_secondary.addWidget(btn_suprimir)
 
-        layout.addLayout(row5)
+        layout.addLayout(row_secondary)
 
         card.setLayout(layout)
         card._download_btn = btn_download
@@ -416,10 +468,22 @@ class HomologacaoTab(QWidget):
         self._current_page = 1
         self._load_data()
 
+    def _on_sort_changed(self, _index):
+        self._current_page = 1
+        self._load_data()
+
+    def _on_sort_toggled(self, checked):
+        self._sort_toggle.setIcon(self._icon_sort_desc if checked else self._icon_sort_asc)
+        self._current_page = 1
+        self._load_data()
+
     def _load_data(self):
-        """Carrega catálogo de homologação com filtros e paginação."""
+        """Carrega catálogo de homologação com filtros, ordenação e paginação."""
         filter_text = self._status_filter.currentText()
         status = _STATUS_FILTERS.get(filter_text, "AGUARDANDO")
+        sort_index = self._sort_combo.currentIndex()
+        sort_field = _SORT_OPTIONS[sort_index][1]
+        sort_direction = "desc" if self._sort_toggle.isChecked() else "asc"
         self._controller.load_catalogo_homologacao(
             status_filter=status,
             mapeamento_id=self._filter_id.text().strip(),
@@ -427,6 +491,8 @@ class HomologacaoTab(QWidget):
             descricao=self._filter_descricao.text().strip(),
             page=self._current_page,
             size=20,
+            sort=sort_field,
+            direction=sort_direction,
         )
 
     def _on_data_loaded(self, items, pagination):
@@ -481,7 +547,10 @@ class HomologacaoTab(QWidget):
     # ================================================================
 
     def _on_download(self, zonal_id, catalogo_item):
-        self._controller.download_zonal_result(zonal_id, catalogo_item=catalogo_item)
+        # Homologador visualiza sem bloquear edição — sempre read_only
+        self._controller.download_zonal_result(
+            zonal_id, catalogo_item=catalogo_item, read_only=True,
+        )
 
     def _on_parecer(self, zonal_id):
         from ..dialogs.parecer_dialog import ParecerDialog
@@ -577,9 +646,10 @@ class HomologacaoTab(QWidget):
     def _format_metodo(metodo_apply):
         """Converte metodoApply em label legível."""
         labels = {
-            "METODO_1": "Método 1",
-            "METODO_2_DISCRETO": "Método 2a (Discreto)",
-            "METODO_2_FUZZY": "Método 2b (Fuzzy)",
+            "METODO_1": "Fatiamento do índice de Vegetação",
+            "METODO_2_DISCRETO": "Detecção de mudança (discreto)",
+            "METODO_2_FUZZY": "Detecção de mudança (fuzzy)",
             "METODO_3": "Método 3",
+            "AUTOMATICO": "Automático",
         }
         return labels.get(metodo_apply, metodo_apply)
