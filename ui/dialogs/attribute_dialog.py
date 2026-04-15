@@ -96,8 +96,9 @@ class AttributeEditDialog(QDialog):
 
     def _build_ui(self):
         self.setWindowTitle("Editar Atributos")
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(720)
         self.setMinimumHeight(500)
+        self.resize(780, 600)
         self.setStyleSheet(_DIALOG_STYLESHEET)
 
         root = QVBoxLayout()
