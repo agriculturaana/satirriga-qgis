@@ -5,6 +5,46 @@ Todas as mudancas notaveis do SatIrriga QGIS Plugin serao documentadas neste arq
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
 e o versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
+## [3.0.0] - 2026-04-15
+
+### Adicionado
+
+- **Aba de Homologação:** fluxo completo de revisão técnica com emissão de parecer (aprovar/reprovar/devolver/cancelar), suprimir mapeamento, filtros por status (Aguardando, Homologados, Reprovados, Cancelados), ordenação e paginação server-side, e download somente leitura das camadas do zonal para inspeção visual
+- **Histórico de envios:** nova aba com cards por batch (status, métricas, versionamento) e comparação visual entre versões, com zoom automático na extensão combinada das camadas carregadas
+- **Hierarquia de camadas raster:** árvore Datas → Bandas → Cenas agrupando tiles Sentinel-2 por data de aquisição, com bandas RGB, NDVI, NDWI e Albedo segregadas em grupos
+- **Camadas de diferença (NDVI/NDWI/albedo):** URLs `operator=SUBTRACT` já prontas do servidor indexadas na data da primeira imagem do par, deduplicadas por URL, com paletas específicas (SPECTRAL para NDVI/NDWI, COOLWARM para albedo)
+- **Downloads segregados por origem:** Mapeamentos e Homologação são gravados em diretórios distintos e carregados em grupos separados na árvore de camadas, permitindo coexistência do mesmo zonal em ambos os fluxos
+- **Reprocessamento de overlay:** botão dedicado para zonais com falha em estatísticas zonais, com polling de status e feedback inline
+- **Encerramento de mapeamento:** ação na aba de homologação que finaliza o ciclo de um mapeamento
+- **Progresso inline por zonal:** label dinâmica nos cards reflete transições em tempo real (`PROCESSING` → `OVERLAID` → `CONSOLIDATED`)
+- **Polling contínuo de status:** sem cache local, o badge do zonal acompanha o estado real retornado pela API, encerrando automaticamente ao atingir status terminal
+- **Renovação automática de editToken:** re-checkout disparado antes da expiração para evitar falhas em uploads longos
+- **Ordenação server-side no catálogo:** combobox de ordenação com direção ascendente/descendente
+- **Requisitos de homologação:** validação do papel `homologar` antes de permitir ações restritas
+- **Diálogo de parecer:** dialog dedicado com validação de tamanho mínimo do motivo
+
+### Corrigido
+
+- **Detecção de novas geometrias para sincronização:** features recém-criadas agora são marcadas corretamente como `NEW` e incluídas no batch de envio
+- **Conversão FlatGeobuf resiliente a erros de parse por feature:** features inválidas são registradas e puladas sem abortar o download inteiro
+- **Atualização de status dos cards de zonal:** removido cache local que impedia o badge de refletir a transição real retornada pela API; eliminado ciclo render → recache → piscar
+- **Máscara ROI acima dos polígonos da zonal:** borda tracejada de referência agora é sempre visível, posicionada no topo do grupo
+- **Download somente leitura na aba de homologação:** homologador visualiza sem disparar checkout (sem lock de edição)
+- **Ícones SVG invisíveis** nos botões de paginação e remoção
+- **Ícone apagado** na aba de homologação
+- **Largura do diálogo de edição de atributos** ampliada para acomodar campos sem truncamento
+
+### Alterado
+
+- **Carregamento inicial da árvore raster limitado à data mais recente:** reduz o volume de camadas adicionadas ao QGIS; demais datas permanecem disponíveis na hierarquia para carregamento sob demanda
+- **Intervalo de polling de status reduzido de 3s para 1s:** transições entre estados intermediários tornam-se mais responsivas nos cards
+- **Polling de status inscrito no ciclo contínuo:** cada zonal intermediário é acompanhado até atingir estado terminal, sem depender de consultas pontuais
+
+### Compatibilidade
+
+- Downloads existentes permanecem válidos: o campo `origin` no sidecar é lido com fallback para `mapeamentos` quando ausente
+- Zonais baixados em versões anteriores continuam acessíveis em ambas as abas conforme o `origin` gravado no sidecar
+
 ## [2.2.0] - 2026-02-22
 
 ### Adicionado

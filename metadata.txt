@@ -2,13 +2,27 @@
 name=SatIrriga QGIS
 qgisMinimumVersion=3.22
 description=QGIS client for the SatIrriga platform (ANA/INPE). Browse, download, edit, and submit satellite-based irrigation maps.
-version=2.2.0
+version=3.0.0
 author=Tharles de Sousa Andrade | ANA | INPE
 email=irtharles@gmail.com
 
 about=SatIrriga QGIS is the official desktop client for the SatIrriga platform, a satellite-based irrigation monitoring system developed jointly by ANA (Brazil's National Water and Sanitation Agency) and INPE (Brazil's National Institute for Space Research). The plugin enables a complete field-validation workflow without leaving the QGIS environment: authenticate securely via Single Sign-On (OIDC/PKCE through Keycloak); browse the zonal catalog and download geospatial results as editable GeoPackage files via FlatGeobuf; refine geometries using the full suite of QGIS sketching and editing tools; and submit revisions back to the Feature Server with asynchronous processing and conflict resolution. Designed for analysts and technicians who review remote-sensing-derived irrigation maps, the plugin streamlines the review-and-correction cycle that is central to the SatIrriga quality-assurance process.
 
 changelog=
+  3.0.0
+  - Homologação tab: technical review workflow with approve, return, retract and suppress actions
+  - Upload history tab with versioned visual comparison and automatic zoom to extent
+  - Raster hierarchy: scenes grouped by date and band (RGB, NDVI, NDWI, Albedo)
+  - Difference layers (NDVI/NDWI/albedo diff) deduplicated per image pair
+  - Downloads segregated by origin (Mapeamentos vs Homologação) in the layer tree
+  - Overlay reprocessing and mapeamento closure triggers
+  - Inline per-zonal progress and continuous server status polling
+  - Automatic editToken renewal and server-side sorting in catalog
+  - Fix: new geometries not flagged for sync (NEW status)
+  - Fix: FlatGeobuf conversion resilient to per-feature parse errors
+  - Fix: zonal status cards now reflect real-time server state without stale cache
+  - Fix: mask ROI layer rendered above zonal polygons
+  - Perf: raster tree loads only the most recent date by default
   2.2.0
   - Typed attribute editor dialog with collapsible sections and field coercion
   - Error dialog with expandable details
