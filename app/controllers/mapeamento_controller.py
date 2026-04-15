@@ -68,7 +68,7 @@ class MapeamentoController(QObject):
         self._pending_status_oneshot_ids = {}  # request_id -> zonal_id (leitura pontual)
         self._polling_zonals = {}        # zonal_id -> {"request_id": None, "errors": 0}
         self._poll_timer = QTimer(self)
-        self._poll_timer.setInterval(3000)
+        self._poll_timer.setInterval(1000)
         self._poll_timer.timeout.connect(self._poll_active_zonals)
         self._pending_overlay_ids = {}   # request_id -> zonal_id
         self._pending_versions_ids = {}   # request_id -> zonal_id

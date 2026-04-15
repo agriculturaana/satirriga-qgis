@@ -44,7 +44,6 @@ class CamadasTab(QWidget):
         self._gpkg_list = []
         self._active_batch_uuid = None
         self._cards_by_zonal = {}        # (zonal_id, origin) -> card widget
-        self._zonal_status_cache = {}    # zonal_id -> último status conhecido
         self._intermediate_statuses = {
             "PROCESSING", "OVERLAID", "CREATED", "CONSOLIDATING",
         }
@@ -398,33 +397,32 @@ class CamadasTab(QWidget):
                     widget._btn_encerrar.setToolTip(tooltip)
 
     def _on_zonal_upload_done(self, gpkg_path, zonal_id):
-        # Atualiza contagens de sync local e re-renderiza; o badge é restaurado
-        # automaticamente a partir do cache dentro de _render_cards.
+        # Atualiza contagens de sync local. Sempre consulta o servidor para
+        # refletir a transição real em tempo real, sem depender de cache.
         self._refresh_list()
-        # Força início imediato do polling — task terminou, mas o servidor pode
-        # ainda estar processando overlay/estatísticas zonais.
         if zonal_id:
-            self._zonal_status_cache[zonal_id] = "PROCESSING"
             self._apply_queue_badge_all(zonal_id, "PROCESSING")
-            if not self._controller.is_polling(zonal_id):
-                self._controller.start_polling_zonal(zonal_id)
+            self._controller.start_polling_zonal(zonal_id)
 
     def _on_zonal_status_polled(self, zonal_id, status):
-        """Atualiza cache e badge de todos os cards do zonal informado."""
+        """Aplica badge nos cards do zonal conforme resposta do servidor.
+
+        Sem cache: cada resposta reflete o estado atual retornado pela API.
+        Enquanto intermediário, mantém o polling; ao atingir terminal,
+        apenas encerra o polling — o badge permanece visível nos cards
+        já renderizados. Não dispara ``_refresh_list`` aqui para evitar
+        loop (render zera badge → novo poll → terminal → refresh…).
+        """
         if not status:
             return
-        prev = self._zonal_status_cache.get(zonal_id)
-        self._zonal_status_cache[zonal_id] = status
 
         self._apply_queue_badge_all(zonal_id, status)
 
         if status in self._intermediate_statuses:
-            # Garante acompanhamento em tempo real
             if not self._controller.is_polling(zonal_id):
                 self._controller.start_polling_zonal(zonal_id)
-        elif prev in self._intermediate_statuses:
-            # Transitou de intermediário → terminal: recontar sync sem piscar o badge
-            self._refresh_list()
+        else:
+            self._controller.stop_polling_zonal(zonal_id)
 
     def _apply_queue_badge_all(self, zonal_id, status):
         """Aplica badge em todos os cards que referenciam o zonal (Mapeamentos/Homologação)."""
@@ -560,11 +558,12 @@ class CamadasTab(QWidget):
         self._fetch_statuses_for_visible_cards()
 
     def _fetch_statuses_for_visible_cards(self):
-        """Dispara consulta pontual de status para cada zonal renderizado.
+        """Inicia polling de status para cada zonal renderizado.
 
-        Reflete no card o status atual do servidor (PROCESSING/CONSOLIDATED/
-        OVERLAID/etc.), igual à coluna Status da listagem web, sem depender
-        de polling ativo.
+        Em vez de consulta pontual, inscreve cada zonal no polling contínuo
+        do controller — assim o card reflete transições em tempo real
+        (PROCESSING → OVERLAID → CONSOLIDATED). Quando atinge status
+        terminal, ``_on_zonal_status_polled`` encerra o polling.
         """
         if not self._state.is_authenticated:
             return
@@ -574,7 +573,7 @@ class CamadasTab(QWidget):
             if zid is None or zid in seen:
                 continue
             seen.add(zid)
-            self._controller.fetch_zonal_status(zid)
+            self._controller.start_polling_zonal(zid)
 
     def _render_cards(self):
         self._card_list.clear()
@@ -595,10 +594,6 @@ class CamadasTab(QWidget):
             origin_key = gpkg_info.get("origin") or "mapeamentos"
             if zid is not None:
                 self._cards_by_zonal[(zid, origin_key)] = card
-                # Aplica badge a partir do cache de status (persistente entre renders)
-                cached = self._zonal_status_cache.get(zid)
-                if cached:
-                    self._apply_queue_badge(card, cached)
 
             list_item = QListWidgetItem(self._card_list)
             list_item.setSizeHint(card.sizeHint() + QSize(0, 8))
