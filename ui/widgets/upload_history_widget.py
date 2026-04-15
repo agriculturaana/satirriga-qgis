@@ -15,7 +15,9 @@ from qgis.PyQt.QtWidgets import (
 from qgis.core import (
     QgsProject, QgsVectorLayer, QgsMessageLog, Qgis,
     QgsRuleBasedRenderer, QgsSymbol, QgsFillSymbol,
+    QgsRectangle,
 )
+from qgis.utils import iface as qgis_iface
 
 from ...domain.models.enums import UploadBatchStatusEnum
 from ...infra.config.settings import PLUGIN_NAME
@@ -375,6 +377,23 @@ class UploadHistoryWidget(QWidget):
             )
 
         self._compare_received.clear()
+
+        # Zoom para a extensão combinada das camadas de comparação
+        self._zoom_to_compare_layers()
+
+    def _zoom_to_compare_layers(self):
+        """Ajusta o mapa para exibir a extensão combinada das camadas de comparação."""
+        combined = QgsRectangle()
+        for layer_id in self._compare_layer_ids:
+            layer = QgsProject.instance().mapLayer(layer_id)
+            if layer and layer.featureCount() > 0:
+                combined.combineExtentWith(layer.extent())
+
+        if not combined.isNull() and qgis_iface:
+            combined.scale(1.1)  # margem de 10%
+            canvas = qgis_iface.mapCanvas()
+            canvas.setExtent(combined)
+            canvas.refresh()
 
     @staticmethod
     def _apply_diff_style(layer):
