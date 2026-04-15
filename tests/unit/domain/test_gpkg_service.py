@@ -85,16 +85,27 @@ class TestGpkgPath:
 
 
 class TestGpkgPathForZonal:
-    def test_format(self):
+    def test_format_default_origin(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = gpkg_path_for_zonal(tmpdir, 99)
-            expected = os.path.join(tmpdir, "zonal_99", "zonal_99.gpkg")
+            expected = os.path.join(tmpdir, "mapeamentos", "zonal_99", "zonal_99.gpkg")
             assert result == expected
+
+    def test_format_homologacao(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = gpkg_path_for_zonal(tmpdir, 99, "homologacao")
+            expected = os.path.join(tmpdir, "homologacao", "zonal_99", "zonal_99.gpkg")
+            assert result == expected
+
+    def test_unknown_origin_falls_back_to_mapeamentos(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = gpkg_path_for_zonal(tmpdir, 7, "algo-invalido")
+            assert os.sep + "mapeamentos" + os.sep in result
 
     def test_creates_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            gpkg_path_for_zonal(tmpdir, 42)
-            assert os.path.isdir(os.path.join(tmpdir, "zonal_42"))
+            gpkg_path_for_zonal(tmpdir, 42, "mapeamentos")
+            assert os.path.isdir(os.path.join(tmpdir, "mapeamentos", "zonal_42"))
 
 
 class TestSidecarPath:
@@ -157,8 +168,14 @@ class TestWriteReadSidecar:
 
 
 class TestLayerNames:
-    def test_layer_group_name(self):
-        assert layer_group_name("Cerrado 2024") == "SatIrriga / Cerrado 2024"
+    def test_layer_group_name_default(self):
+        assert layer_group_name("Cerrado 2024") == "SatIrriga / Mapeamentos / Cerrado 2024"
+
+    def test_layer_group_name_homologacao(self):
+        assert (
+            layer_group_name("Cerrado 2024", "homologacao")
+            == "SatIrriga / Homologação / Cerrado 2024"
+        )
 
     def test_layer_name(self):
         assert layer_name("RANDOM_FOREST") == "RANDOM_FOREST"
@@ -207,6 +224,35 @@ class TestListLocalGpkgs:
             assert result[0]["has_sidecar"] is False
             assert result[0]["mapeamento_id"] is None
             assert result[0]["metodo_id"] is None
+            # Legado (sem subpasta de origem): fallback para mapeamentos
+            assert result[0]["origin"] == "mapeamentos"
+
+    def test_v2_with_origin_subdir_homologacao(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            z_dir = os.path.join(tmpdir, "homologacao", "zonal_99")
+            os.makedirs(z_dir)
+            gpkg_file = os.path.join(z_dir, "zonal_99.gpkg")
+            with open(gpkg_file, "w") as f:
+                f.write("fake gpkg v2")
+
+            result = list_local_gpkgs(tmpdir)
+            assert len(result) == 1
+            assert result[0]["zonal_id"] == 99
+            assert result[0]["origin"] == "homologacao"
+
+    def test_v2_origin_from_sidecar_overrides_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Arquivo em subpasta "mapeamentos" mas sidecar diz "homologacao"
+            z_dir = os.path.join(tmpdir, "mapeamentos", "zonal_7")
+            os.makedirs(z_dir)
+            gpkg_file = os.path.join(z_dir, "zonal_7.gpkg")
+            with open(gpkg_file, "w") as f:
+                f.write("fake gpkg v2")
+            write_sidecar(gpkg_file, {"zonalId": 7, "origin": "homologacao"})
+
+            result = list_local_gpkgs(tmpdir)
+            assert len(result) == 1
+            assert result[0]["origin"] == "homologacao"
 
     def test_v2_with_sidecar(self):
         with tempfile.TemporaryDirectory() as tmpdir:

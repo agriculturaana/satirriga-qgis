@@ -6,7 +6,7 @@ from pathlib import Path
 
 from qgis.core import QgsApplication
 
-from ..models.enums import SyncStatusEnum
+from ..models.enums import SyncStatusEnum, DownloadOrigin
 
 # Campos adicionais de controle de sync inseridos no GPKG local (V1)
 SYNC_FIELDS = [
@@ -47,9 +47,13 @@ def gpkg_path(base_dir: str, mapeamento_id: int, metodo_id: int) -> str:
     return os.path.join(folder, f"metodo_{metodo_id}.gpkg")
 
 
-def gpkg_path_for_zonal(base_dir: str, zonal_id: int) -> str:
-    """Caminho completo do GPKG para um zonal (V2)."""
-    folder = os.path.join(base_dir, f"zonal_{zonal_id}")
+def gpkg_path_for_zonal(base_dir: str, zonal_id: int, origin: str = None) -> str:
+    """Caminho completo do GPKG para um zonal (V2), segregado por origem.
+
+    Estrutura: {base_dir}/{origin}/zonal_{zonal_id}/zonal_{zonal_id}.gpkg
+    """
+    origin_key = DownloadOrigin.coerce(origin).value
+    folder = os.path.join(base_dir, origin_key, f"zonal_{zonal_id}")
     os.makedirs(folder, exist_ok=True)
     return os.path.join(folder, f"zonal_{zonal_id}.gpkg")
 
@@ -94,9 +98,17 @@ def detect_gpkg_version(gpkg_path_str: str) -> int:
     return 0
 
 
-def layer_group_name(descricao: str) -> str:
-    """Nome do grupo de camadas no layer tree."""
-    return f"SatIrriga / {descricao}"
+SATIRRIGA_ROOT_GROUP = "SatIrriga"
+
+
+def origin_group_label(origin: str = None) -> str:
+    """Retorna o rótulo do subgrupo de origem na árvore de camadas."""
+    return DownloadOrigin.coerce(origin).label
+
+
+def layer_group_name(descricao: str, origin: str = None) -> str:
+    """Nome do grupo de camadas no layer tree (formato plano, com origem)."""
+    return f"{SATIRRIGA_ROOT_GROUP} / {origin_group_label(origin)} / {descricao}"
 
 
 def layer_name(metodo_apply: str) -> str:
@@ -137,11 +149,14 @@ def list_local_gpkgs(base_dir: str) -> list:
     if not base.exists():
         return result
 
+    known_origins = {o.value for o in DownloadOrigin}
+
     for gpkg_file in base.rglob("*.gpkg"):
         mapeamento_id = None
         metodo_id = None
         zonal_id = None
         gpkg_type = "v1"
+        origin = None
 
         parent_name = gpkg_file.parent.name
         fname = gpkg_file.stem
@@ -153,6 +168,10 @@ def list_local_gpkgs(base_dir: str) -> list:
                 gpkg_type = "v2"
             except (ValueError, IndexError):
                 pass
+
+            grandparent = gpkg_file.parent.parent.name
+            if grandparent in known_origins:
+                origin = grandparent
 
         # Detecta V1: mapeamento_X/metodo_Y.gpkg
         if parent_name.startswith("mapeamento_"):
@@ -170,19 +189,25 @@ def list_local_gpkgs(base_dir: str) -> list:
         sc_path = sidecar_path(str(gpkg_file))
         has_sidecar = os.path.exists(sc_path)
 
+        # Enriquece com dados do sidecar (mapeamentoId, dataReferencia, descricao, origin)
+        sc_data = read_sidecar(str(gpkg_file)) if has_sidecar else {}
+        if sc_data.get("origin") and sc_data["origin"] in known_origins:
+            origin = sc_data["origin"]
+
+        origin_key = DownloadOrigin.coerce(origin).value
+
         entry = {
             "path": str(gpkg_file),
             "mapeamento_id": mapeamento_id,
             "metodo_id": metodo_id,
             "zonal_id": zonal_id,
             "type": gpkg_type,
+            "origin": origin_key,
             "has_sidecar": has_sidecar,
             "size_mb": round(gpkg_file.stat().st_size / (1024 * 1024), 2),
         }
 
-        # Enriquece com dados do sidecar (mapeamentoId, dataReferencia, descricao)
-        if has_sidecar:
-            sc_data = read_sidecar(str(gpkg_file))
+        if sc_data:
             if sc_data.get("mapeamentoId"):
                 entry["mapeamento_id"] = sc_data["mapeamentoId"]
             if sc_data.get("dataReferencia"):

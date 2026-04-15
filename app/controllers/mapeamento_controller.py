@@ -16,7 +16,7 @@ class MapeamentoController(QObject):
     """Orquestra operacoes de mapeamento V2 (zonal)."""
 
     # Signals V2 (zonal)
-    zonal_download_completed = pyqtSignal(str, int, object)  # gpkg_path, zonal_id, catalogo_meta
+    zonal_download_completed = pyqtSignal(str, int, object)  # gpkg_path, zonal_id, meta (inclui 'origin')
     zonal_upload_completed = pyqtSignal(str, int)    # gpkg_path, zonal_id
     versions_loaded = pyqtSignal(int, dict)          # zonal_id, versions_data
     compare_fgb_ready = pyqtSignal(int, str, bytes)  # zonal_id, batch_uuid, fgb_bytes
@@ -44,6 +44,7 @@ class MapeamentoController(QObject):
         self._renew_timer.start()
         self._pending_renew_id = None
         self._pending_renew_zonal_id = None
+        self._pending_renew_gpkg_path = None
 
         # Tracking de requests pendentes
         self._pending_catalogo_id = None
@@ -64,6 +65,7 @@ class MapeamentoController(QObject):
         self._pending_finalizar_zonal_request_id = None
         self._pending_finalizar_zonal_id = None
         self._pending_poll_ids = {}      # request_id -> zonal_id
+        self._pending_status_oneshot_ids = {}  # request_id -> zonal_id (leitura pontual)
         self._polling_zonals = {}        # zonal_id -> {"request_id": None, "errors": 0}
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(3000)
@@ -265,6 +267,19 @@ class MapeamentoController(QObject):
     # Polling de status do zonal (reprocessamento)
     # ----------------------------------------------------------------
 
+    def fetch_zonal_status(self, zonal_id):
+        """Consulta pontual de status do zonal. Emite zonal_status_polled ao receber.
+
+        Diferente de start_polling_zonal, não agenda requisições repetidas —
+        útil para carregar o status atual ao montar cards sem exigir que o
+        zonal esteja em estado intermediário.
+        """
+        if not self._state.is_authenticated or not zonal_id:
+            return
+        url = self._api_url(f"/zonal/{zonal_id}/status")
+        request_id = self._http.get(url)
+        self._pending_status_oneshot_ids[request_id] = zonal_id
+
     def start_polling_zonal(self, zonal_id):
         """Inicia polling de status para um zonal em reprocessamento."""
         if zonal_id not in self._polling_zonals:
@@ -327,7 +342,9 @@ class MapeamentoController(QObject):
     def _check_token_renewal(self):
         """Verifica sidecars locais e renova tokens com menos de 24h de validade."""
         from datetime import datetime, timezone
-        from ...domain.services.gpkg_service import gpkg_base_dir, read_sidecar
+        from ...domain.services.gpkg_service import (
+            gpkg_base_dir, read_sidecar, list_local_gpkgs,
+        )
 
         if not self._state.is_authenticated or not self._token_provider:
             return
@@ -339,44 +356,33 @@ class MapeamentoController(QObject):
         now = datetime.now(timezone.utc)
         threshold_hours = 24
 
-        try:
-            entries = os.listdir(base)
-        except OSError:
-            return
-
-        for entry in entries:
+        for entry in list_local_gpkgs(base):
+            if entry.get("type") != "v2":
+                continue
+            gpkg = entry["path"]
             try:
-                entry_path = os.path.join(base, entry)
-                if not os.path.isdir(entry_path):
+                sidecar = read_sidecar(gpkg)
+                expires_at = sidecar.get("expiresAt")
+                edit_token = sidecar.get("editToken")
+                zonal_id = sidecar.get("zonalId")
+                if not expires_at or not edit_token or not zonal_id:
                     continue
-                for fname in os.listdir(entry_path):
-                    if not fname.endswith(".gpkg"):
-                        continue
-                    try:
-                        gpkg = os.path.join(entry_path, fname)
-                        sidecar = read_sidecar(gpkg)
-                        expires_at = sidecar.get("expiresAt")
-                        edit_token = sidecar.get("editToken")
-                        zonal_id = sidecar.get("zonalId")
-                        if not expires_at or not edit_token or not zonal_id:
-                            continue
-                        exp_dt = datetime.fromisoformat(
-                            expires_at.replace("Z", "+00:00")
-                        )
-                        remaining = (exp_dt - now).total_seconds() / 3600
-                        if 0 < remaining < threshold_hours:
-                            self._renew_edit_token(zonal_id, edit_token)
-                    except (ValueError, TypeError, OSError):
-                        continue
-            except OSError:
+                exp_dt = datetime.fromisoformat(
+                    expires_at.replace("Z", "+00:00")
+                )
+                remaining = (exp_dt - now).total_seconds() / 3600
+                if 0 < remaining < threshold_hours:
+                    self._renew_edit_token(zonal_id, edit_token, gpkg_path=gpkg)
+            except (ValueError, TypeError, OSError):
                 continue
 
-    def _renew_edit_token(self, zonal_id, edit_token):
+    def _renew_edit_token(self, zonal_id, edit_token, gpkg_path=None):
         """Envia POST /api/zonal/:id/renew-token."""
         url = self._api_url(f"/zonal/{zonal_id}/renew-token")
         payload = json.dumps({"editToken": edit_token}).encode("utf-8")
         self._pending_renew_id = self._http.post_json(url, payload)
         self._pending_renew_zonal_id = zonal_id
+        self._pending_renew_gpkg_path = gpkg_path
         QgsMessageLog.logMessage(
             f"Renovando editToken para zonal #{zonal_id}",
             PLUGIN_NAME, Qgis.Info,
@@ -636,6 +642,19 @@ class MapeamentoController(QObject):
             except Exception as e:
                 self._state.set_error("finalizar_zonal", str(e))
 
+        elif request_id in self._pending_status_oneshot_ids:
+            zid = self._pending_status_oneshot_ids.pop(request_id)
+            try:
+                data = json.loads(body)
+                zonal_status = data.get("status", "")
+                if zonal_status:
+                    self._state.zonal_status_polled.emit(zid, zonal_status)
+            except Exception as e:
+                QgsMessageLog.logMessage(
+                    f"[Status] Erro ao parsear status one-shot do zonal {zid}: {e}",
+                    PLUGIN_NAME, Qgis.Warning,
+                )
+
         elif request_id in self._pending_poll_ids:
             zid = self._pending_poll_ids.pop(request_id)
             if zid in self._polling_zonals:
@@ -662,16 +681,16 @@ class MapeamentoController(QObject):
         elif request_id == self._pending_renew_id:
             self._pending_renew_id = None
             zonal_id = self._pending_renew_zonal_id
+            gpkg = getattr(self, "_pending_renew_gpkg_path", None)
             self._pending_renew_zonal_id = None
+            self._pending_renew_gpkg_path = None
             try:
                 from ...domain.services.gpkg_service import (
-                    gpkg_base_dir, gpkg_path_for_zonal, read_sidecar, write_sidecar,
+                    read_sidecar, write_sidecar,
                 )
                 data = json.loads(body)
                 new_expires = data.get("expiresAt")
-                if new_expires and zonal_id:
-                    base = gpkg_base_dir(self._config.get("gpkg_base_dir"))
-                    gpkg = gpkg_path_for_zonal(base, zonal_id)
+                if new_expires and zonal_id and gpkg:
                     sidecar = read_sidecar(gpkg)
                     sidecar["expiresAt"] = new_expires
                     write_sidecar(gpkg, sidecar)
@@ -818,6 +837,12 @@ class MapeamentoController(QObject):
             self._pending_finalizar_zonal_id = None
             self._state.set_loading("finalizar_zonal", False)
             self._state.set_error("finalizar_zonal", error_msg)
+        elif request_id in self._pending_status_oneshot_ids:
+            zid = self._pending_status_oneshot_ids.pop(request_id)
+            QgsMessageLog.logMessage(
+                f"[Status] Falha one-shot zonal {zid}: {error_msg}",
+                PLUGIN_NAME, Qgis.Info,
+            )
         elif request_id in self._pending_poll_ids:
             zid = self._pending_poll_ids.pop(request_id)
             if zid in self._polling_zonals:
@@ -868,14 +893,19 @@ class MapeamentoController(QObject):
     # ----------------------------------------------------------------
 
     def download_zonal_result(self, zonal_id, catalogo_item=None,
-                             read_only=False):
+                             read_only=False, origin=None):
         """Inicia download do resultado zonal via checkout + FlatGeobuf.
 
         Se read_only=True, pula checkout (sem lock de edição) e marca o
         GPKG como somente leitura no sidecar.
+
+        ``origin`` identifica a aba de origem (``mapeamentos`` ou
+        ``homologacao``) para segregar caminho em disco e grupo na árvore
+        de camadas.
         """
         from ...infra.tasks.download_task import DownloadZonalTask
         from ...domain.services.gpkg_service import gpkg_path_for_zonal, gpkg_base_dir
+        from ...domain.models.enums import DownloadOrigin
 
         if not self._state.is_authenticated or not self._token_provider:
             self._state.set_error("download", "Nao autenticado")
@@ -886,21 +916,23 @@ class MapeamentoController(QObject):
             self._state.set_error("download", "Token nao disponivel")
             return
 
+        origin_key = DownloadOrigin.coerce(origin).value
+
         checkout_url = self._api_url(f"/zonal/{zonal_id}/checkout")
         download_url = self._api_url(f"/zonal/{zonal_id}/download-result")
         base_dir = gpkg_base_dir(self._config.get("gpkg_base_dir"))
-        output_path = gpkg_path_for_zonal(base_dir, zonal_id)
+        output_path = gpkg_path_for_zonal(base_dir, zonal_id, origin_key)
 
         # Metadados do catalogo para enriquecer sidecar
-        catalogo_meta = {}
+        catalogo_meta = {"origin": origin_key}
         if catalogo_item:
-            catalogo_meta = {
+            catalogo_meta.update({
                 "mapeamentoId": catalogo_item.mapeamento_id,
                 "dataReferencia": catalogo_item.data_referencia,
                 "descricao": catalogo_item.descricao,
                 "jobId": catalogo_item.job_id,
                 "metodoApply": catalogo_item.metodo_apply,
-            }
+            })
 
         task = DownloadZonalTask(
             checkout_url=checkout_url,
@@ -910,6 +942,7 @@ class MapeamentoController(QObject):
             zonal_id=zonal_id,
             catalogo_meta=catalogo_meta,
             read_only=read_only,
+            origin=origin_key,
         )
 
         task.signals.completed.connect(

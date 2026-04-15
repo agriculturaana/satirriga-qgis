@@ -20,7 +20,7 @@ from qgis.core import QgsMessageLog, Qgis
 
 from ..theme import SectionHeader
 
-from ...domain.models.enums import ZonalStatusEnum
+from ...domain.models.enums import ZonalStatusEnum, DownloadOrigin
 from ...infra.config.settings import PLUGIN_NAME
 from ..icon_utils import tinted_icon
 
@@ -549,7 +549,10 @@ class HomologacaoTab(QWidget):
     def _on_download(self, zonal_id, catalogo_item):
         # Homologador visualiza sem bloquear edição — sempre read_only
         self._controller.download_zonal_result(
-            zonal_id, catalogo_item=catalogo_item, read_only=True,
+            zonal_id,
+            catalogo_item=catalogo_item,
+            read_only=True,
+            origin=DownloadOrigin.HOMOLOGACAO.value,
         )
 
     def _on_parecer(self, zonal_id):

@@ -59,6 +59,7 @@ class ZonalStatusEnum(str, Enum):
     CONSOLIDATED = "CONSOLIDATED"
     CONSOLIDATION_FAILED = "CONSOLIDATION_FAILED"
     OVERLAID = "OVERLAID"
+    OVERLAY_FAILED = "OVERLAY_FAILED"
     INVALIDATED = "INVALIDATED"
     AGUARDANDO = "AGUARDANDO"
     HOMOLOGADO = "HOMOLOGADO"
@@ -76,6 +77,7 @@ class ZonalStatusEnum(str, Enum):
             self.CONSOLIDATED: "Consolidado",
             self.CONSOLIDATION_FAILED: "Falha na consolidação",
             self.OVERLAID: "Overlay concluído",
+            self.OVERLAY_FAILED: "Falha no overlay",
             self.INVALIDATED: "Invalidado",
             self.AGUARDANDO: "Aguardando",
             self.HOMOLOGADO: "Homologado",
@@ -94,6 +96,7 @@ class ZonalStatusEnum(str, Enum):
             self.CONSOLIDATED: "#1B5E20",
             self.CONSOLIDATION_FAILED: "#B71C1C",
             self.OVERLAID: "#42A5F5",
+            self.OVERLAY_FAILED: "#B71C1C",
             self.INVALIDATED: "#795548",
             self.AGUARDANDO: "#FFC107",
             self.HOMOLOGADO: "#2E7D32",
@@ -142,3 +145,27 @@ class ConflictResolutionEnum(str, Enum):
     TAKE_MINE = "TAKE_MINE"
     TAKE_THEIRS = "TAKE_THEIRS"
     MERGE = "MERGE"
+
+
+class DownloadOrigin(str, Enum):
+    MAPEAMENTOS = "mapeamentos"
+    HOMOLOGACAO = "homologacao"
+
+    @property
+    def label(self):
+        return {
+            self.MAPEAMENTOS: "Mapeamentos",
+            self.HOMOLOGACAO: "Homologação",
+        }.get(self, self.value)
+
+    @classmethod
+    def coerce(cls, value):
+        """Converte string para enum, com fallback para MAPEAMENTOS."""
+        if isinstance(value, cls):
+            return value
+        if not value:
+            return cls.MAPEAMENTOS
+        try:
+            return cls(str(value).lower())
+        except ValueError:
+            return cls.MAPEAMENTOS

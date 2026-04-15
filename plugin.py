@@ -324,11 +324,11 @@ class SatIrrigaPlugin:
         self.dock.set_page_widget(SatIrrigaDock.PAGE_HOME, home_tab)
 
         # Mapeamentos: page 1
-        mapeamentos_tab = MapeamentosTab(
+        self._mapeamentos_tab = MapeamentosTab(
             state=self._state,
             mapeamento_controller=self._mapeamento_controller,
         )
-        self.dock.set_page_widget(SatIrrigaDock.PAGE_MAPEAMENTOS, mapeamentos_tab)
+        self.dock.set_page_widget(SatIrrigaDock.PAGE_MAPEAMENTOS, self._mapeamentos_tab)
 
         # Camadas: page 2
         self._camadas_tab = CamadasTab(
@@ -379,6 +379,11 @@ class SatIrrigaPlugin:
         self._connect(
             self._mapeamento_controller.zonal_upload_completed,
             lambda _path, _zid: self._upload_history_tab.load(),
+        )
+        # Catálogo: recarregar lista de mapeamentos após sincronização
+        self._connect(
+            self._mapeamento_controller.zonal_upload_completed,
+            lambda _path, _zid: self._mapeamentos_tab._on_catalogo_refresh(),
         )
 
         # V2: zonal download -> carregar layer no QGIS
@@ -597,6 +602,35 @@ class SatIrrigaPlugin:
                 Qgis.Warning,
             )
 
+    def _remove_zonal_group(self, parent_group, zonal_id):
+        """Remove subgrupo do zonal informado dentro de ``parent_group``.
+
+        Remove tambem as camadas associadas (``QgsProject.removeMapLayer``)
+        para evitar orfaos. A identificacao usa ``customProperty``
+        ``satirriga/zonal_id`` — imune a renomeacoes de descricao.
+        """
+        from qgis.core import QgsProject
+        try:
+            target_id = int(zonal_id)
+        except (TypeError, ValueError):
+            return
+        project = QgsProject.instance()
+        for child in list(parent_group.children()):
+            prop = child.customProperty("satirriga/zonal_id")
+            if prop is None:
+                continue
+            try:
+                if int(prop) != target_id:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            # Remove camadas contidas no subgrupo antes de remover o no
+            for leaf in child.findLayers():
+                layer = leaf.layer()
+                if layer is not None:
+                    project.removeMapLayer(layer.id())
+            parent_group.removeChildNode(child)
+
     def _add_base_layers(self, group):
         """Adiciona camadas base ao grupo do mapeamento.
 
@@ -722,20 +756,34 @@ class SatIrrigaPlugin:
                                      camadas_tab):
         """Carrega GPKG V2 (zonal) no projeto QGIS apos download.
 
-        Cria grupo nomeado pelo mapeamento, adiciona vetor editavel e
-        dispara carregamento automatico de rasters de referencia.
+        Cria grupo aninhado ``SatIrriga / <Origem> / #... - <desc>`` e, caso
+        ja exista um grupo para o mesmo ``zonal_id`` dentro da mesma origem,
+        remove-o (e suas camadas) antes de recriar, garantindo estado limpo
+        a cada redownload. Origens distintas (Mapeamentos vs Homologacao)
+        sao mantidas lado a lado.
         """
         from qgis.core import QgsProject, QgsVectorLayer
-        from .domain.services.gpkg_service import layer_group_name
+        from .domain.services.gpkg_service import (
+            SATIRRIGA_ROOT_GROUP,
+            origin_group_label,
+            read_sidecar,
+        )
+        from .domain.models.enums import DownloadOrigin
+
+        # Origem: prioridade meta do download, fallback para sidecar no disco
+        origin_raw = (catalogo_meta or {}).get("origin")
+        if not origin_raw:
+            origin_raw = read_sidecar(gpkg_path).get("origin")
+        origin_enum = DownloadOrigin.coerce(origin_raw)
+        origin_key = origin_enum.value
+        origin_label = origin_group_label(origin_key)
 
         mapeamento_id = catalogo_meta.get("mapeamentoId")
         descricao = catalogo_meta.get("descricao", "")
         job_id = catalogo_meta.get("jobId")
         metodo_apply = catalogo_meta.get("metodoApply")
 
-        # Nome do grupo: "#42 - Descrição" ou fallback "Zonal {id}"
         if mapeamento_id:
-            # Limpa HTML/texto longo para legibilidade
             from qgis.PyQt.QtGui import QTextDocument
             if descricao:
                 doc = QTextDocument()
@@ -749,10 +797,19 @@ class SatIrrigaPlugin:
             suffix = f"Zonal {zonal_id}"
 
         root = QgsProject.instance().layerTreeRoot()
-        group_name = layer_group_name(suffix)
-        group = root.findGroup(group_name)
-        if not group:
-            group = root.addGroup(group_name)
+        parent = root.findGroup(SATIRRIGA_ROOT_GROUP)
+        if not parent:
+            parent = root.addGroup(SATIRRIGA_ROOT_GROUP)
+        origin_group = parent.findGroup(origin_label)
+        if not origin_group:
+            origin_group = parent.addGroup(origin_label)
+
+        # Remove grupo anterior do MESMO zonal na MESMA origem (se existir)
+        self._remove_zonal_group(origin_group, zonal_id)
+
+        group = origin_group.addGroup(suffix)
+        group.setCustomProperty("satirriga/zonal_id", int(zonal_id))
+        group.setCustomProperty("satirriga/origin", origin_key)
 
         metodo_label = self._format_metodo(metodo_apply)
         layer_name = (
@@ -835,7 +892,7 @@ class SatIrrigaPlugin:
             if not group:
                 group = root.insertGroup(0, group_name)
 
-        dates_group = group.addGroup("Datas")
+        dates_group = group.addGroup("Cenas")
 
         for date_group in hierarchy.dates:
             date_node = dates_group.addGroup(date_group.date_label)

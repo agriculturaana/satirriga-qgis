@@ -13,7 +13,7 @@ import requests
 from qgis.core import Qgis
 
 from .base_task import SatIrrigaTask
-from ...domain.models.enums import SyncStatusEnum
+from ...domain.models.enums import SyncStatusEnum, DownloadOrigin
 from ...domain.services.gpkg_service import SYNC_FIELDS_V2, write_sidecar, read_sidecar
 
 
@@ -22,7 +22,7 @@ class DownloadZonalTask(SatIrrigaTask):
 
     def __init__(self, checkout_url, download_url, access_token,
                  gpkg_output_path, zonal_id, catalogo_meta=None,
-                 read_only=False):
+                 read_only=False, origin=None):
         super().__init__(f"Download zonal {zonal_id}")
         self._checkout_url = checkout_url
         self._download_url = download_url
@@ -31,6 +31,7 @@ class DownloadZonalTask(SatIrrigaTask):
         self._zonal_id = zonal_id
         self._catalogo_meta = catalogo_meta or {}
         self._read_only = read_only
+        self._origin = DownloadOrigin.coerce(origin).value
 
     def _validate_existing_gpkg(self, gpkg_path, expected_count):
         """Verifica se GPKG existente tem features e geometrias validas.
@@ -194,6 +195,7 @@ class DownloadZonalTask(SatIrrigaTask):
                         "snapshotHash": snapshot_hash,
                         "expiresAt": expires_at,
                         "downloadedAt": datetime.now(timezone.utc).isoformat(),
+                        "origin": self._origin,
                     })
                     write_sidecar(self._gpkg_path, sidecar_data)
                     self.setProgress(100)
@@ -449,6 +451,7 @@ class DownloadZonalTask(SatIrrigaTask):
                 "etag": response_etag,
                 "downloadedAt": now_iso,
                 "readOnly": self._read_only,
+                "origin": self._origin,
             }
             # Dados enriquecidos do catalogo
             if self._catalogo_meta:

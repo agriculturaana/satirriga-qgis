@@ -16,7 +16,7 @@ from qgis.core import QgsMessageLog, Qgis
 from ..theme import SectionHeader
 from ..icon_utils import tinted_icon
 
-from ...domain.models.enums import ZonalStatusEnum
+from ...domain.models.enums import ZonalStatusEnum, DownloadOrigin
 
 _ICONS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -165,6 +165,7 @@ class MapeamentosTab(QWidget):
         _ALLOWED_STATUSES = {
             ZonalStatusEnum.CONSOLIDATED,
             ZonalStatusEnum.CONSOLIDATION_FAILED,
+            ZonalStatusEnum.OVERLAY_FAILED,
             ZonalStatusEnum.OVERLAID,
             ZonalStatusEnum.INVALIDATED,
             ZonalStatusEnum.HOMOLOGADO,
@@ -311,6 +312,7 @@ class MapeamentosTab(QWidget):
         _reprocessable = {
             ZonalStatusEnum.FAILED.value,
             ZonalStatusEnum.CONSOLIDATION_FAILED.value,
+            ZonalStatusEnum.OVERLAY_FAILED.value,
         }
         _intermediate = {"PROCESSING", "OVERLAID", "CREATED", "CONSOLIDATING"}
         _parecer_statuses = {
@@ -491,7 +493,7 @@ class MapeamentosTab(QWidget):
         from ...domain.services.gpkg_service import gpkg_path_for_zonal, read_sidecar
         try:
             base = self._controller.get_gpkg_base_dir()
-            gpkg = gpkg_path_for_zonal(base, item.id)
+            gpkg = gpkg_path_for_zonal(base, item.id, DownloadOrigin.MAPEAMENTOS.value)
             row5 = QHBoxLayout()
             row5.setSpacing(6)
 
@@ -783,7 +785,10 @@ class MapeamentosTab(QWidget):
             and catalogo_item.status in _READ_ONLY_STATUSES
         )
         self._controller.download_zonal_result(
-            zonal_id, catalogo_item=catalogo_item, read_only=read_only,
+            zonal_id,
+            catalogo_item=catalogo_item,
+            read_only=read_only,
+            origin=DownloadOrigin.MAPEAMENTOS.value,
         )
 
     def _reprocess_overlay(self, zonal_id):

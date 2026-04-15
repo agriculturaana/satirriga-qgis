@@ -12,7 +12,7 @@ from qgis.PyQt.QtWidgets import (
 )
 from qgis.core import QgsProject, QgsVectorLayer, QgsMessageLog, Qgis
 
-from ...domain.models.enums import SyncStatusEnum
+from ...domain.models.enums import SyncStatusEnum, ZonalStatusEnum
 from ...infra.config.settings import PLUGIN_NAME
 from ..theme import SectionHeader
 from ..icon_utils import tinted_icon
@@ -43,6 +43,11 @@ class CamadasTab(QWidget):
         self._controller = mapeamento_controller
         self._gpkg_list = []
         self._active_batch_uuid = None
+        self._cards_by_zonal = {}        # (zonal_id, origin) -> card widget
+        self._zonal_status_cache = {}    # zonal_id -> último status conhecido
+        self._intermediate_statuses = {
+            "PROCESSING", "OVERLAID", "CREATED", "CONSOLIDATING",
+        }
 
         self._build_ui()
         self._connect_signals()
@@ -123,10 +128,9 @@ class CamadasTab(QWidget):
         self._state.mapeamento_encerrado.connect(self._on_mapeamento_encerrado)
         self._state.error_occurred.connect(self._on_error)
 
-        self._controller.zonal_upload_completed.connect(
-            lambda path, zid: self._on_zonal_upload_done()
-        )
+        self._controller.zonal_upload_completed.connect(self._on_zonal_upload_done)
         self._controller.edit_tracking_done.connect(self._refresh_list)
+        self._state.zonal_status_polled.connect(self._on_zonal_status_polled)
 
     # ================================================================
     # Card factory
@@ -165,6 +169,18 @@ class CamadasTab(QWidget):
         id_label.setStyleSheet("font-size: 13px;")
         row1.addWidget(id_label)
 
+        # Origin badge — distingue downloads da aba Mapeamentos vs Homologação
+        from ...domain.models.enums import DownloadOrigin
+        origin_enum = DownloadOrigin.coerce(gpkg_info.get("origin"))
+        origin_color = "#455A64" if origin_enum == DownloadOrigin.MAPEAMENTOS else "#6A1B9A"
+        origin_badge = QLabel(origin_enum.label)
+        origin_badge.setStyleSheet(
+            f"background-color: {origin_color}; color: white;"
+            " border-radius: 3px; padding: 1px 6px; font-size: 10px;"
+        )
+        origin_badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        row1.addWidget(origin_badge)
+
         # Sync status badge
         sync_text, sync_color = self._format_sync_status(counts)
         badge = QLabel(sync_text)
@@ -174,6 +190,13 @@ class CamadasTab(QWidget):
         )
         badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         row1.addWidget(badge)
+
+        # Queue status badge (overlay/zonal) — visível somente durante polling
+        queue_badge = QLabel()
+        queue_badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        queue_badge.setVisible(False)
+        row1.addWidget(queue_badge)
+        card._queue_badge = queue_badge
 
         row1.addStretch()
 
@@ -296,6 +319,7 @@ class CamadasTab(QWidget):
         card.setLayout(layout)
         card._action_buttons = [btn_open, btn_upload]
         card._btn_encerrar = btn_encerrar
+        card._zonal_id = zonal_id
         return card
 
     @staticmethod
@@ -373,8 +397,61 @@ class CamadasTab(QWidget):
                 if tooltip:
                     widget._btn_encerrar.setToolTip(tooltip)
 
-    def _on_zonal_upload_done(self):
+    def _on_zonal_upload_done(self, gpkg_path, zonal_id):
+        # Atualiza contagens de sync local e re-renderiza; o badge é restaurado
+        # automaticamente a partir do cache dentro de _render_cards.
         self._refresh_list()
+        # Força início imediato do polling — task terminou, mas o servidor pode
+        # ainda estar processando overlay/estatísticas zonais.
+        if zonal_id:
+            self._zonal_status_cache[zonal_id] = "PROCESSING"
+            self._apply_queue_badge_all(zonal_id, "PROCESSING")
+            if not self._controller.is_polling(zonal_id):
+                self._controller.start_polling_zonal(zonal_id)
+
+    def _on_zonal_status_polled(self, zonal_id, status):
+        """Atualiza cache e badge de todos os cards do zonal informado."""
+        if not status:
+            return
+        prev = self._zonal_status_cache.get(zonal_id)
+        self._zonal_status_cache[zonal_id] = status
+
+        self._apply_queue_badge_all(zonal_id, status)
+
+        if status in self._intermediate_statuses:
+            # Garante acompanhamento em tempo real
+            if not self._controller.is_polling(zonal_id):
+                self._controller.start_polling_zonal(zonal_id)
+        elif prev in self._intermediate_statuses:
+            # Transitou de intermediário → terminal: recontar sync sem piscar o badge
+            self._refresh_list()
+
+    def _apply_queue_badge_all(self, zonal_id, status):
+        """Aplica badge em todos os cards que referenciam o zonal (Mapeamentos/Homologação)."""
+        for (zid, _origin), card in self._cards_by_zonal.items():
+            if zid == zonal_id and hasattr(card, "_queue_badge"):
+                self._apply_queue_badge(card, status)
+
+    @staticmethod
+    def _apply_queue_badge(card, status):
+        """Atualiza texto/cor do badge de status da fila no card."""
+        badge = getattr(card, "_queue_badge", None)
+        if badge is None:
+            return
+        try:
+            enum = ZonalStatusEnum(status)
+            label_text = enum.label
+            color = enum.color
+        except ValueError:
+            label_text = status or "Processando"
+            color = "#FF9800"
+        badge.setText(f"⚙ {label_text}")
+        badge.setToolTip("Andamento da fila de overlay/zonal no servidor")
+        badge.setStyleSheet(
+            f"background-color: {color}; color: white;"
+            " border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: bold;"
+        )
+        badge.setVisible(True)
 
     def _on_upload_cancelled(self):
         QgsMessageLog.logMessage(
@@ -480,9 +557,28 @@ class CamadasTab(QWidget):
 
         self._sort_gpkg_list()
         self._render_cards()
+        self._fetch_statuses_for_visible_cards()
+
+    def _fetch_statuses_for_visible_cards(self):
+        """Dispara consulta pontual de status para cada zonal renderizado.
+
+        Reflete no card o status atual do servidor (PROCESSING/CONSOLIDATED/
+        OVERLAID/etc.), igual à coluna Status da listagem web, sem depender
+        de polling ativo.
+        """
+        if not self._state.is_authenticated:
+            return
+        seen = set()
+        for entry in self._gpkg_list:
+            zid = entry.get("zonal_id")
+            if zid is None or zid in seen:
+                continue
+            seen.add(zid)
+            self._controller.fetch_zonal_status(zid)
 
     def _render_cards(self):
         self._card_list.clear()
+        self._cards_by_zonal = {}
 
         if not self._gpkg_list:
             self._status_label.setText("Nenhuma camada local encontrada")
@@ -494,6 +590,15 @@ class CamadasTab(QWidget):
         for gpkg_info in self._gpkg_list:
             counts = gpkg_info.get("sync_counts", {})
             card = self._create_card(gpkg_info, counts)
+
+            zid = gpkg_info.get("zonal_id")
+            origin_key = gpkg_info.get("origin") or "mapeamentos"
+            if zid is not None:
+                self._cards_by_zonal[(zid, origin_key)] = card
+                # Aplica badge a partir do cache de status (persistente entre renders)
+                cached = self._zonal_status_cache.get(zid)
+                if cached:
+                    self._apply_queue_badge(card, cached)
 
             list_item = QListWidgetItem(self._card_list)
             list_item.setSizeHint(card.sizeHint() + QSize(0, 8))
