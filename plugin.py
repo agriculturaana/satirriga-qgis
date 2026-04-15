@@ -894,7 +894,9 @@ class SatIrrigaPlugin:
 
         dates_group = group.addGroup("Cenas")
 
-        for date_group in hierarchy.dates:
+        # Carrega apenas a data mais recente (dates[0]): hierarchy.dates é
+        # ordenado desc por data em raster_service._build_hierarchy.
+        for date_group in hierarchy.dates[:1]:
             date_node = dates_group.addGroup(date_group.date_label)
 
             for band_group in date_group.bands:
@@ -934,9 +936,11 @@ class SatIrrigaPlugin:
                 if not band_has_visible:
                     band_node.setItemVisibilityChecked(False)
 
+        loaded_dates = hierarchy.dates[:1]
         self._log(
-            f"Arvore raster criada: {len(hierarchy.dates)} datas, "
-            f"{sum(len(dg.bands) for dg in hierarchy.dates)} bandas"
+            f"Arvore raster criada: {len(loaded_dates)} data, "
+            f"{sum(len(dg.bands) for dg in loaded_dates)} bandas "
+            f"(de {len(hierarchy.dates)} datas disponiveis)"
         )
 
     @staticmethod
@@ -995,7 +999,9 @@ class SatIrrigaPlugin:
 
         layer.setReadOnly(True)
         QgsProject.instance().addMapLayer(layer, False)
-        group.addLayer(layer)
+        # Máscara entra acima dos polígonos da zonal: como é uma borda tracejada
+        # de referência (sem preenchimento), deve ser desenhada por cima.
+        group.insertLayer(0, layer)
         layer.triggerRepaint()
 
         self._log(f"Camada Máscara/ROI criada para mapeamento #{mapeamento_id}")
