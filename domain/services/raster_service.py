@@ -21,6 +21,7 @@ Para customizacao de visualizacao, o endpoint direto pode ser usado:
     https://jobs.snirh.gov.br/tiles/s2/{image_id}/{z}/{x}/{y}?band={index}
 """
 
+import re
 from collections import defaultdict
 from typing import List
 
@@ -47,10 +48,13 @@ _ALL_METHOD_KEYS = [
 
 # Padroes de visualizacao — calibrados com P2/P98 de 48k geometrias zonais
 _BAND_DEFAULTS = {
-    "original":  VisParams(band="original", min_val=0, max_val=3000, gamma=1.2),
-    "NDVI":      VisParams(band="NDVI", min_val=0, max_val=0.8, palette="RDYLGN"),
-    "NDWI":      VisParams(band="NDWI", min_val=-0.7, max_val=0.4, palette="BLUES"),
-    "albedo":    VisParams(band="albedo", min_val=0.1, max_val=1.6, palette="HOT_R"),
+    "original":    VisParams(band="original", min_val=0, max_val=3000, gamma=1.2),
+    "NDVI":        VisParams(band="NDVI", min_val=0, max_val=0.8, palette="RDYLGN"),
+    "NDWI":        VisParams(band="NDWI", min_val=-0.7, max_val=0.4, palette="BLUES"),
+    "albedo":      VisParams(band="albedo", min_val=0.1, max_val=1.6, palette="HOT_R"),
+    "ndvi_diff":   VisParams(band="NDVI", palette="SPECTRAL"),
+    "ndwi_diff":   VisParams(band="NDWI", palette="SPECTRAL"),
+    "albedo_diff": VisParams(band="albedo", palette="COOLWARM"),
 }
 
 # Mapeamento: chave em url_indices da API -> (band_key, display_name, layer_type, visible)
@@ -61,8 +65,17 @@ _INDEX_KEY_MAP = {
     "albedo":     ("albedo",    "Albedo",        "ALBEDO",     False),
 }
 
+# Mapeamento das chaves de diferenca (pre-construidas com operator=SUBTRACT).
+# URL ja vem pronta do servidor com image_id composto {img_A}-{img_B}.
+_DIFF_KEY_MAP = {
+    "Diferença NDVI":   ("ndvi_diff",   "Diff NDVI",   "NDVI_DIFF"),
+    "Diferença NDWI":   ("ndwi_diff",   "Diff NDWI",   "NDWI_DIFF"),
+    "Diferença albedo": ("albedo_diff", "Diff Albedo", "ALBEDO_DIFF"),
+}
+
 # Ordem desejada das bandas na arvore QGIS
-_BAND_ORDER = ["original", "NDVI", "NDWI", "albedo"]
+_BAND_ORDER = ["original", "NDVI", "NDWI", "albedo",
+               "ndvi_diff", "ndwi_diff", "albedo_diff"]
 
 # Paletas disponiveis para customizacao
 AVAILABLE_PALETTES = [
@@ -187,12 +200,18 @@ def build_raster_hierarchy(tile_data, metodo_apply: str,
         date_iso = _extract_date(item)
         by_date[date_iso].append(item)
 
+    # Camadas de diferenca (URLs ja prontas com operator=SUBTRACT),
+    # deduplicadas por URL e indexadas pela data da primeira imagem do par.
+    diff_layers = _collect_diff_layers(tile_data, sidecar)
+
+    # Garante que datas de diffs ausentes em tiles (raro) ainda apareçam.
     # Ordena datas (mais recente primeiro); "" vai ao final
-    sorted_dates = sorted(by_date.keys(), reverse=True)
+    all_dates = set(by_date.keys()) | set(diff_layers.keys())
+    sorted_dates = sorted(all_dates, reverse=True)
 
     date_groups = []
     for date_iso in sorted_dates:
-        tiles = by_date[date_iso]
+        tiles = by_date.get(date_iso, [])
         date_label = _format_date_label(date_iso)
 
         # Coleta layers por band_key para todos os tiles desta data
@@ -210,22 +229,17 @@ def build_raster_hierarchy(tile_data, metodo_apply: str,
                 _build_legacy_layers(bands_map, tile_item, tile_name, image_id,
                                      sidecar)
 
+        # Anexa camadas de diferenca desta data (ja deduplicadas)
+        for band_key, config in diff_layers.get(date_iso, {}).items():
+            bands_map.setdefault(band_key, []).append(config)
+
         # Monta BandGroups na ordem definida por _BAND_ORDER
         band_groups = []
         for band_key in _BAND_ORDER:
             layers = bands_map.get(band_key)
             if not layers:
                 continue
-            # Determina display_name e band_key
-            if band_key == "original":
-                band_name = "RGB"
-            else:
-                # Pega do primeiro layer
-                band_name = next(
-                    (dn for k, dn, _, _ in _INDEX_KEY_MAP.values()
-                     if k == band_key),
-                    band_key,
-                )
+            band_name = _resolve_band_name(band_key)
             band_groups.append(BandGroup(
                 band_name=band_name,
                 band_key=band_key,
@@ -324,6 +338,82 @@ def _build_legacy_layers(bands_map: dict, tile_item: dict,
                 is_visible=default_visible,
             )
         )
+
+
+def _resolve_band_name(band_key: str) -> str:
+    """Nome de exibicao do grupo de banda a partir do band_key."""
+    if band_key == "original":
+        return "RGB"
+    name = next(
+        (dn for k, dn, _, _ in _INDEX_KEY_MAP.values() if k == band_key),
+        None,
+    )
+    if name:
+        return name
+    name = next(
+        (dn for k, dn, _ in _DIFF_KEY_MAP.values() if k == band_key),
+        None,
+    )
+    return name or band_key
+
+
+def _collect_diff_layers(tile_data: list, sidecar: dict = None) -> dict:
+    """Extrai camadas de diferenca (NDVI/NDWI/albedo diff) dos method responses.
+
+    As URLs de diferenca ja vem prontas com operator=SUBTRACT e image_id
+    composto {img_A}-{img_B}. Como o servidor replica a mesma URL em todos
+    os tiles da resposta, deduplicamos por URL (uma diff por banda por par).
+
+    Returns:
+        dict date_iso -> {band_key: RasterLayerConfig}, onde date_iso e a
+        data extraida da primeira parte do compound image_id (img_A).
+    """
+    seen_urls = set()
+    out = defaultdict(dict)
+    for tile_item in tile_data:
+        for key in _ALL_METHOD_KEYS:
+            resp = tile_item.get(key)
+            if not resp or not isinstance(resp, dict):
+                continue
+            url_indices = resp.get("url_indices") or {}
+            for api_key, url in url_indices.items():
+                mapping = _DIFF_KEY_MAP.get(api_key)
+                if not mapping or not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                band_key, display_name, layer_type = mapping
+                compound_id = _extract_image_id_from_url(url)
+                date_iso = _extract_date_from_image_id(compound_id)
+                if band_key in out[date_iso]:
+                    continue  # ja ha diff desta banda nesta data
+                out[date_iso][band_key] = RasterLayerConfig(
+                    name=display_name,
+                    xyz_url=url,
+                    layer_type=layer_type,
+                    tile="",
+                    image_id=compound_id,
+                    vis_params=get_default_vis_params(band_key, sidecar),
+                    is_visible=False,
+                )
+    return out
+
+
+def _extract_image_id_from_url(url: str) -> str:
+    """Extrai segmento de image_id (possivelmente composto) de uma URL de tiles."""
+    m = re.search(r"/tiles/s2/([^/]+)/", url)
+    return m.group(1) if m else ""
+
+
+def _extract_date_from_image_id(compound_id: str) -> str:
+    """Para image_id composto 'img_A-img_B', retorna data ISO de img_A.
+
+    Ex: '20251122T125321_20251122T125323_T24MXU-20251115T...' -> '2025-11-22'
+    """
+    if not compound_id:
+        return ""
+    first = compound_id.split("-", 1)[0]
+    m = re.match(r"(\d{4})(\d{2})(\d{2})T", first)
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else ""
 
 
 def _find_url_indices(tile_item: dict) -> dict:

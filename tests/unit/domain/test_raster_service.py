@@ -16,7 +16,10 @@ from domain.services.raster_service import (
 # Fixtures
 # ----------------------------------------------------------------
 
-ALL_BAND_KEYS = list(_BAND_ORDER)
+# Bandas base sempre geradas via acesso direto (image_id).
+# Diffs so aparecem quando url_indices traz as chaves "Diferenca ...".
+BASE_BAND_KEYS = ["original", "NDVI", "NDWI", "albedo"]
+ALL_BAND_KEYS = BASE_BAND_KEYS
 
 
 def _make_tile(image_id="S2A_MSIL2A_20251022T132231_N0511_R038_T24MXT_20251022T172030",
@@ -202,6 +205,136 @@ class TestBuildHierarchyEdgeCases:
         tile_data = [_make_tile(data="")]
         h = build_raster_hierarchy(tile_data, "RANDOM_FOREST")
         assert h.dates[0].date_label == "Sem data"
+
+
+# ----------------------------------------------------------------
+# build_raster_hierarchy — camadas de diferenca
+# ----------------------------------------------------------------
+
+# URL de diff e replicada em todos os tiles da resposta (payload real).
+_DIFF_NDVI_URL = (
+    "https://jobs.snirh.gov.br/tiles/s2/"
+    "20251122T125321_20251122T125323_T24MXU-20251115T125259_20251115T125302_T24MXU"
+    "/{z}/{x}/{y}?band=NDVI&min=0.035&max=0.23&operator=SUBTRACT"
+)
+_DIFF_NDWI_URL = _DIFF_NDVI_URL.replace("band=NDVI", "band=NDWI")
+_DIFF_ALBEDO_URL = _DIFF_NDVI_URL.replace("band=NDVI", "band=albedo")
+
+
+def _make_fuzzy_tile(image_id, data):
+    """Tile real do payload fuzzy: url_indices com bases + 3 diffs identicas."""
+    return {
+        "id_imagem": image_id,
+        "tile": "24MXU_52",
+        "data": data,
+        "url": f"https://jobs.snirh.gov.br/tiles/s2/{image_id}/{{z}}/{{x}}/{{y}}?band=original",
+        "metodo2_fuzzy_response": {
+            "url_indices": {
+                "NDVI": f"https://jobs.snirh.gov.br/tiles/s2/{image_id}/{{z}}/{{x}}/{{y}}?band=NDVI",
+                "Diferença NDVI": _DIFF_NDVI_URL,
+                "NDWI": f"https://jobs.snirh.gov.br/tiles/s2/{image_id}/{{z}}/{{x}}/{{y}}?band=NDWI",
+                "Diferença NDWI": _DIFF_NDWI_URL,
+                "albedo": f"https://jobs.snirh.gov.br/tiles/s2/{image_id}/{{z}}/{{x}}/{{y}}?band=albedo",
+                "Diferença albedo": _DIFF_ALBEDO_URL,
+            }
+        },
+    }
+
+
+class TestBuildHierarchyDiff:
+    """Cobertura do payload real com 'Diferença NDVI/NDWI/albedo'."""
+
+    def test_diffs_appear_on_first_image_date(self):
+        """Diffs devem aparecer apenas na data da primeira imagem do par (img_A)."""
+        tile_data = [
+            _make_fuzzy_tile("20251122T125321_20251122T125323_T24MXU", "2025-11-22"),
+            _make_fuzzy_tile("20251115T125259_20251115T125302_T24MXU", "2025-11-15"),
+            _make_fuzzy_tile("20251112T125321_20251112T125321_T24MXU", "2025-11-12"),
+        ]
+        h = build_raster_hierarchy(tile_data, "METODO_2_FUZZY")
+
+        date_to_bandkeys = {
+            d.date_iso: [b.band_key for b in d.bands] for d in h.dates
+        }
+        # Data do par A: possui as 3 diffs alem das bases.
+        assert "ndvi_diff" in date_to_bandkeys["2025-11-22"]
+        assert "ndwi_diff" in date_to_bandkeys["2025-11-22"]
+        assert "albedo_diff" in date_to_bandkeys["2025-11-22"]
+        # Datas fora do par: sem diffs.
+        assert "ndvi_diff" not in date_to_bandkeys["2025-11-15"]
+        assert "ndvi_diff" not in date_to_bandkeys["2025-11-12"]
+
+    def test_diff_layers_deduplicated(self):
+        """Mesma URL replicada em N tiles deve gerar apenas 1 camada por banda."""
+        tile_data = [
+            _make_fuzzy_tile("20251122T125321_20251122T125323_T24MXU", "2025-11-22"),
+            _make_fuzzy_tile("20251115T125259_20251115T125302_T24MXU", "2025-11-15"),
+            _make_fuzzy_tile("20251112T125321_20251112T125321_T24MXU", "2025-11-12"),
+            _make_fuzzy_tile("20251105T125259_20251105T125302_T24MXU", "2025-11-05"),
+        ]
+        h = build_raster_hierarchy(tile_data, "METODO_2_FUZZY")
+
+        date_22 = next(d for d in h.dates if d.date_iso == "2025-11-22")
+        diff_bands = [b for b in date_22.bands if b.band_key.endswith("_diff")]
+        for band in diff_bands:
+            assert len(band.layers) == 1, (
+                f"Esperava 1 layer deduplicada em {band.band_key}, "
+                f"obtive {len(band.layers)}"
+            )
+
+    def test_diff_urls_preserved_verbatim(self):
+        """URL de diff ja vem pronta do servidor — nao deve ser reescrita."""
+        tile_data = [
+            _make_fuzzy_tile("20251122T125321_20251122T125323_T24MXU", "2025-11-22"),
+        ]
+        h = build_raster_hierarchy(tile_data, "METODO_2_FUZZY")
+
+        date_22 = h.dates[0]
+        ndvi_diff = next(b for b in date_22.bands if b.band_key == "ndvi_diff")
+        assert ndvi_diff.layers[0].xyz_url == _DIFF_NDVI_URL
+        assert "operator=SUBTRACT" in ndvi_diff.layers[0].xyz_url
+
+    def test_diff_layers_invisible_by_default(self):
+        tile_data = [
+            _make_fuzzy_tile("20251122T125321_20251122T125323_T24MXU", "2025-11-22"),
+        ]
+        h = build_raster_hierarchy(tile_data, "METODO_2_FUZZY")
+
+        for band in h.dates[0].bands:
+            if band.band_key.endswith("_diff"):
+                for layer in band.layers:
+                    assert layer.is_visible is False
+
+    def test_diff_band_display_names(self):
+        tile_data = [
+            _make_fuzzy_tile("20251122T125321_20251122T125323_T24MXU", "2025-11-22"),
+        ]
+        h = build_raster_hierarchy(tile_data, "METODO_2_FUZZY")
+
+        names = {b.band_key: b.band_name for b in h.dates[0].bands}
+        assert names["ndvi_diff"] == "Diff NDVI"
+        assert names["ndwi_diff"] == "Diff NDWI"
+        assert names["albedo_diff"] == "Diff Albedo"
+
+    def test_no_diffs_when_method_response_lacks_diff_keys(self):
+        """Zonais de metodos sem diffs (e.g. METODO_1) nao devem gerar diff bands."""
+        tile_data = [_make_tile()]
+        h = build_raster_hierarchy(tile_data, "METODO_1")
+
+        for date in h.dates:
+            for band in date.bands:
+                assert not band.band_key.endswith("_diff")
+
+    def test_diff_layer_image_id_is_compound(self):
+        tile_data = [
+            _make_fuzzy_tile("20251122T125321_20251122T125323_T24MXU", "2025-11-22"),
+        ]
+        h = build_raster_hierarchy(tile_data, "METODO_2_FUZZY")
+
+        ndvi_diff = next(
+            b for b in h.dates[0].bands if b.band_key == "ndvi_diff"
+        )
+        assert "-" in ndvi_diff.layers[0].image_id  # compound A-B
 
 
 # ----------------------------------------------------------------
