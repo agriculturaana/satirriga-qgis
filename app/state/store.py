@@ -35,6 +35,9 @@ class AppState(QObject):
     loading_changed = pyqtSignal(str, bool)          # (operation, is_loading)
     error_occurred = pyqtSignal(str, str)             # (operation, message)
 
+    # Configuracao
+    config_changed = pyqtSignal(set)                  # chaves alteradas
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._authenticated = False

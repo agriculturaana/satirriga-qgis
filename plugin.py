@@ -90,7 +90,9 @@ class SatIrrigaPlugin:
 
         self._config_controller = ConfigController(
             config_repo=self._config_repo,
+            state=self._state,
         )
+        self._state.config_changed.connect(self._on_config_changed)
 
         from .app.controllers.timeseries_controller import TimeSeriesController
         self._timeseries_controller = TimeSeriesController(
@@ -146,11 +148,7 @@ class SatIrrigaPlugin:
         try:
             self._ensure_initialized()
 
-            from urllib.parse import urlparse
-            api_host = urlparse(self._config_repo.get("api_base_url")).hostname
-            sso_host = urlparse(self._config_repo.get("sso_base_url")).hostname
-            hosts = [h for h in (api_host, sso_host) if h]
-            self._auth_interceptor.update_allowed_hosts(hosts)
+            self._refresh_allowed_hosts()
 
             # Registra interceptor de tiles base UMA VEZ, em quiescencia de rede.
             # Registrar dentro de callbacks de download (QgsTask.finished)
@@ -583,6 +581,83 @@ class SatIrrigaPlugin:
     # ------------------------------------------------------------------
     # Camadas Base (Google Satellite + Vector Tiles MVT)
     # ------------------------------------------------------------------
+
+    def _refresh_allowed_hosts(self):
+        """Recalcula lista de hosts autorizados do AuthInterceptor a partir da config atual."""
+        from urllib.parse import urlparse
+        api_host = urlparse(self._config_repo.get("api_base_url")).hostname
+        sso_host = urlparse(self._config_repo.get("sso_base_url")).hostname
+        hosts = [h for h in (api_host, sso_host) if h]
+        self._auth_interceptor.update_allowed_hosts(hosts)
+        return api_host
+
+    def _on_config_changed(self, changed_keys):
+        """Propaga mudancas de configuracao para caches em memoria.
+
+        Componentes que nao podem ser atualizados com seguranca em runtime
+        (SessionManager ativo, camadas ja adicionadas ao projeto) exigem
+        logout/relogin e remocao manual das camadas — avisa o usuario.
+        """
+        url_keys = {"api_base_url", "sso_base_url"}
+        if not (changed_keys & url_keys):
+            return
+
+        from urllib.parse import urlparse
+        api_host = self._refresh_allowed_hosts()
+        if "api_base_url" in changed_keys:
+            self._tile_auth_api_host = api_host
+            self._log(
+                f"[Config] Host de tiles atualizado: {api_host}",
+            )
+
+        requires_relogin = bool(
+            self._state and self._state.is_authenticated
+        )
+        try:
+            has_layers = self._has_satirriga_layers()
+        except Exception:
+            has_layers = False
+
+        if requires_relogin or has_layers:
+            from qgis.PyQt.QtWidgets import QMessageBox
+            parts = [
+                self.tr(
+                    "A URL da API/SSO foi alterada. As novas configuracoes "
+                    "foram aplicadas aos componentes internos."
+                ),
+                "",
+            ]
+            if requires_relogin:
+                parts.append(self.tr(
+                    "- Faca logout e login novamente para que a sessao "
+                    "use o novo provedor de identidade."
+                ))
+            if has_layers:
+                parts.append(self.tr(
+                    "- Remova as camadas SatIrriga do projeto e carregue-as "
+                    "novamente para que apontem para o novo servidor."
+                ))
+            QMessageBox.warning(
+                self.iface.mainWindow() if self.iface else None,
+                self.tr("SatIrriga — URL alterada"),
+                "\n".join(parts),
+            )
+
+    def _has_satirriga_layers(self):
+        """Detecta se o projeto contem o grupo raiz SatIrriga com camadas."""
+        try:
+            from qgis.core import QgsProject
+            from .domain.services.gpkg_service import SATIRRIGA_ROOT_GROUP
+        except ImportError:
+            return False
+        project = QgsProject.instance()
+        if project is None:
+            return False
+        root = project.layerTreeRoot()
+        group = root.findGroup(SATIRRIGA_ROOT_GROUP)
+        if group is None:
+            return False
+        return bool(group.children())
 
     def _inject_bearer(self, request):
         """Preprocessor de rede: injeta Bearer token em requisicoes de tiles base.
