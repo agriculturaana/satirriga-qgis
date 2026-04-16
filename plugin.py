@@ -53,6 +53,8 @@ class SatIrrigaPlugin:
         self._pending_raster_group = None  # Grupo-alvo para rasters do download
         self._vis_action = None            # Acao de contexto "Ajustar visualizacao"
         self._tile_auth_set = False        # Preprocessor de auth para tiles base
+        self._tile_auth_processor_id = None  # ID do preprocessor (QGIS >=3.26)
+        self._tile_auth_api_host = None    # Host alvo do preprocessor
         self._initialized = False
 
     def _ensure_initialized(self):
@@ -150,6 +152,11 @@ class SatIrrigaPlugin:
             hosts = [h for h in (api_host, sso_host) if h]
             self._auth_interceptor.update_allowed_hosts(hosts)
 
+            # Registra interceptor de tiles base UMA VEZ, em quiescencia de rede.
+            # Registrar dentro de callbacks de download (QgsTask.finished)
+            # causou SIGSEGV em QGIS 3.34.4 por reentrancia no network manager.
+            self._setup_tile_auth()
+
             # Adia restauracao de sessao para apos o QGIS finalizar o startup
             QTimer.singleShot(500, self._auth_controller.try_restore_session)
         except Exception as e:
@@ -231,13 +238,23 @@ class SatIrrigaPlugin:
                 pass
 
         # Remove interceptor de tiles base
+        # QGIS >=3.26: removeRequestPreprocessor(id). QGIS <=3.24: passar None.
         if self._tile_auth_set:
             try:
                 from qgis.core import QgsNetworkAccessManager
-                QgsNetworkAccessManager.setRequestPreprocessor(None)
+                if self._tile_auth_processor_id and hasattr(
+                    QgsNetworkAccessManager, "removeRequestPreprocessor"
+                ):
+                    QgsNetworkAccessManager.removeRequestPreprocessor(
+                        self._tile_auth_processor_id
+                    )
+                else:
+                    QgsNetworkAccessManager.setRequestPreprocessor(None)
             except Exception:
                 pass
             self._tile_auth_set = False
+            self._tile_auth_processor_id = None
+            self._tile_auth_api_host = None
 
         self._initialized = False
         self._log("Plugin v2 descarregado")
@@ -567,11 +584,40 @@ class SatIrrigaPlugin:
     # Camadas Base (Google Satellite + Vector Tiles MVT)
     # ------------------------------------------------------------------
 
+    def _inject_bearer(self, request):
+        """Preprocessor de rede: injeta Bearer token em requisicoes de tiles base.
+
+        Metodo bound (nao closure) para ancorar lifecycle em ``self`` e evitar
+        segfault por coleta prematura do callable referenciado via SIP/std::function.
+        Invocado pelo ``QgsNetworkAccessManager`` — pode rodar em thread de rede,
+        por isso acessa somente atributos estaveis (``self._tile_auth_api_host``
+        e token atraves do provider do auth_controller).
+        """
+        try:
+            if not self._tile_auth_api_host or not self._auth_controller:
+                return
+            url = request.url()
+            if url.host() != self._tile_auth_api_host:
+                return
+            if "/bases/tiles/" not in url.path():
+                return
+            token = self._auth_controller.get_access_token()
+            if token:
+                request.setRawHeader(
+                    b"Authorization",
+                    f"Bearer {token}".encode("utf-8"),
+                )
+        except Exception:
+            # Nunca propagar excecao para a thread de rede do Qt
+            pass
+
     def _setup_tile_auth(self):
         """Registra interceptor global para injetar Bearer token em tiles base.
 
-        Usa QgsNetworkAccessManager.setRequestPreprocessor() para adicionar
-        Authorization header em requisicoes para /bases/tiles/ no host da API.
+        DEVE ser chamado uma unica vez durante ``initGui``, em quiescencia de
+        rede, antes de qualquer atividade HTTP do plugin. Registrar dentro de
+        callbacks de ``QgsTask.finished`` disparou SIGSEGV em QGIS 3.34.4 por
+        reentrancia no mutex interno do ``QgsNetworkAccessManager``.
         """
         if self._tile_auth_set:
             return
@@ -579,21 +625,16 @@ class SatIrrigaPlugin:
         from urllib.parse import urlparse
         from qgis.core import QgsNetworkAccessManager
 
-        api_host = urlparse(self._config_repo.get("api_base_url")).hostname
-        token_provider = self._auth_controller.get_access_token
-
-        def _inject_bearer(request):
-            url = request.url()
-            if url.host() == api_host and "/bases/tiles/" in url.path():
-                token = token_provider()
-                if token:
-                    request.setRawHeader(
-                        b"Authorization",
-                        f"Bearer {token}".encode("utf-8"),
-                    )
+        self._tile_auth_api_host = urlparse(
+            self._config_repo.get("api_base_url")
+        ).hostname
 
         try:
-            QgsNetworkAccessManager.setRequestPreprocessor(_inject_bearer)
+            # QGIS >=3.26 retorna ID (QString). QGIS <=3.24 retorna None.
+            result = QgsNetworkAccessManager.setRequestPreprocessor(
+                self._inject_bearer
+            )
+            self._tile_auth_processor_id = result if isinstance(result, str) else None
             self._tile_auth_set = True
             self._log("[Auth] Interceptor de tiles base registrado")
         except Exception as e:
@@ -656,8 +697,7 @@ class SatIrrigaPlugin:
             node = base_group.addLayer(satellite)
             node.setItemVisibilityChecked(False)
 
-        # Vector tiles (limites geograficos)
-        self._setup_tile_auth()
+        # Vector tiles (limites geograficos) — preprocessor ja registrado em initGui
         self._add_vector_tile_layers(base_group)
 
         base_group.setExpanded(False)
