@@ -894,7 +894,7 @@ class MapeamentoController(QObject):
 
     def download_zonal_result(self, zonal_id, catalogo_item=None,
                              read_only=False, origin=None):
-        """Inicia download do resultado zonal via checkout + FlatGeobuf.
+        """Inicia download do resultado zonal via checkout + GeoPackage.
 
         Se read_only=True, pula checkout (sem lock de edição) e marca o
         GPKG como somente leitura no sidecar.
@@ -919,7 +919,7 @@ class MapeamentoController(QObject):
         origin_key = DownloadOrigin.coerce(origin).value
 
         checkout_url = self._api_url(f"/zonal/{zonal_id}/checkout")
-        download_url = self._api_url(f"/zonal/{zonal_id}/download-result")
+        download_url = self._api_url(f"/zonal/{zonal_id}/download-result.gpkg")
         base_dir = gpkg_base_dir(self._config.get("gpkg_base_dir"))
         output_path = gpkg_path_for_zonal(base_dir, zonal_id, origin_key)
 
