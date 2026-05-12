@@ -5,6 +5,35 @@ Todas as mudancas notaveis do SatIrriga QGIS Plugin serao documentadas neste arq
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
 e o versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
+## [3.1.0] - 2026-05-12
+
+### Adicionado
+
+- **Inspeção pontual de índices espectrais:** painel flutuante consulta NDVI, SAVI, EVI, NDWI, MNDWI e Albedo no ponto clicado, para os `image_ids` das datas expandidas na árvore de camadas; cache LRU evita requisições repetidas
+- **Download de mapeamento homologado (somente leitura):** novo botão "Baixar Mapeamento Homologado" nos cards homologados da aba Homologação baixa o GeoPackage consolidado em `{base_dir}/homologacao/mapeamento_<id>/`
+- **Camadas-base por viewport via GeoJSON:** carregamento sob demanda das camadas Municipios, Bacias Fiscalização e Empreendimentos a partir do bbox visível, substituindo MVT
+- **Cards de Camadas Locais com método e descrição completos:** layout espelha a aba Mapeamentos (linha `data · método` + descrição com word-wrap até 3 linhas e tooltip), com `metodoApply` extraído do sidecar
+- **Download direto de resultado zonal em GeoPackage:** endpoint dedicado evita conversão FGB→GPKG no cliente
+
+### Corrigido
+
+- **Comparação de versões com GeoPackage:** endpoint do backend migrado de `ST_AsFlatGeobuf` para `ST_AsGeoJSON + ogr2ogr→GPKG`, contornando bug do PostGIS 3.4.x (RDS) que corrompia o binário FGB quando havia muitas colunas TEXT (`Column index out of range` no parser GDAL → camada vazia no QGIS)
+- **Renderer da camada de comparação:** trocado `QgsRuleBasedRenderer` (cuja root rule com símbolo padrão azul renderizava todas as features por baixo das categorias semitransparentes) por `QgsCategorizedSymbolRenderer`, agora as cores CREATED/MODIFIED/DELETED/ACCEPTED batem com a legenda
+- **SIGSEGV ao registrar interceptor de tiles base no startup**
+- **URL da API/SSO aplicada sem necessidade de reiniciar o QGIS**
+- **Label de versão sincronizado:** `PLUGIN_VERSION` em `settings.py` estava preso em `2.1.0`; agora reflete a versão real do plugin em todos os locais que consomem a constante (header do dock, aba Home)
+
+### Alterado
+
+- **Paleta default do Albedo:** alterada de `HOT_R` (vermelho-laranja invertido, faixa 0.1..1.6) para `ALBEDO` (cinza preto→branco) com faixa `-0.7..0.4` (mesma do NDWI). Configurações já salvas em `QgsSettings` permanecem intocadas
+- **Camada base "Bacias Hidrograficas" renomeada para "Bacias Fiscalização"** (chave interna `bacias` e endpoint preservados)
+- **Removida exibição de área (ha)** dos cards das abas Mapeamentos e Homologação; mantém-se a contagem de feições
+
+### Compatibilidade
+
+- GeoPackages baixados antes desta versão sem `metodoApply` no sidecar exibem `—` no campo de método; rebaixar restaura o valor
+- Endpoint de comparação `/api/zonal/:id/compare` agora serve `Content-Type: application/geopackage+sqlite3` (era `application/flatgeobuf`); requer backend ≥ correspondente
+
 ## [3.0.0] - 2026-04-15
 
 ### Adicionado

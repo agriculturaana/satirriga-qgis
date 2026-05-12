@@ -14,8 +14,8 @@ from qgis.PyQt.QtWidgets import (
 
 from qgis.core import (
     QgsProject, QgsVectorLayer, QgsMessageLog, Qgis,
-    QgsRuleBasedRenderer, QgsSymbol, QgsFillSymbol,
-    QgsRectangle,
+    QgsCategorizedSymbolRenderer, QgsRendererCategory,
+    QgsFillSymbol, QgsRectangle,
 )
 from qgis.utils import iface as qgis_iface
 
@@ -325,16 +325,16 @@ class UploadHistoryWidget(QWidget):
         self._controller.download_compare_fgb(zonal_id, batch_a)
         self._controller.download_compare_fgb(zonal_id, batch_b)
 
-    def _on_compare_fgb_ready(self, zonal_id, batch_uuid, fgb_bytes):
-        """Recebe FlatGeobuf de uma versão. Quando ambas chegam, carrega no mapa."""
+    def _on_compare_fgb_ready(self, zonal_id, batch_uuid, layer_bytes):
+        """Recebe GeoPackage de uma versão. Quando ambas chegam, carrega no mapa."""
         if batch_uuid not in self._compare_pending:
             return
 
-        # Salvar FGB em arquivo temporário
+        # Salvar GPKG em arquivo temporário
         tmp = tempfile.NamedTemporaryFile(
-            suffix=f"_{batch_uuid[:8]}.fgb", delete=False, prefix="compare_"
+            suffix=f"_{batch_uuid[:8]}.gpkg", delete=False, prefix="compare_"
         )
-        tmp.write(fgb_bytes)
+        tmp.write(layer_bytes)
         tmp.close()
 
         self._compare_received[batch_uuid] = tmp.name
@@ -342,7 +342,7 @@ class UploadHistoryWidget(QWidget):
         self._compare_pending.pop(batch_uuid, None)
 
         QgsMessageLog.logMessage(
-            f"[Compare] FGB recebido: {batch_uuid[:8]} ({len(fgb_bytes)} bytes)",
+            f"[Compare] GPKG recebido: {batch_uuid[:8]} ({len(layer_bytes)} bytes)",
             PLUGIN_NAME, Qgis.Info,
         )
 
@@ -351,7 +351,7 @@ class UploadHistoryWidget(QWidget):
             self._load_compare_layers(zonal_id)
 
     def _load_compare_layers(self, zonal_id):
-        """Carrega dois FlatGeobuf como camadas com estilo diferencial."""
+        """Carrega dois GeoPackages como camadas com estilo diferencial."""
         uuids = list(self._compare_received.keys())
         paths = [self._compare_received[u] for u in uuids]
 
@@ -397,23 +397,25 @@ class UploadHistoryWidget(QWidget):
 
     @staticmethod
     def _apply_diff_style(layer):
-        """Aplica estilo baseado em regras por editAction."""
-        root_rule = QgsRuleBasedRenderer.Rule(QgsFillSymbol.createSimple({}))
+        """Categoriza por editAction com uma cor por valor.
 
+        Trocado de QgsRuleBasedRenderer (que tinha root rule com simbolo
+        padrao azul renderizando todas as features por baixo das
+        categorias semitransparentes, mascarando-as) para
+        QgsCategorizedSymbolRenderer, idiomatico para "uma cor por valor
+        de coluna" e sem fallback indesejado.
+        """
+        categories = []
         for action, (color, opacity) in _DIFF_STYLES.items():
             symbol = QgsFillSymbol.createSimple({
-                "color": f"{color}",
+                "color": color,
                 "outline_color": color,
                 "outline_width": "0.5",
             })
             symbol.setOpacity(opacity)
+            categories.append(QgsRendererCategory(action, symbol, action))
 
-            rule = QgsRuleBasedRenderer.Rule(symbol)
-            rule.setLabel(action)
-            rule.setFilterExpression(f'"editAction" = \'{action}\'')
-            root_rule.appendChild(rule)
-
-        renderer = QgsRuleBasedRenderer(root_rule)
+        renderer = QgsCategorizedSymbolRenderer("editAction", categories)
         layer.setRenderer(renderer)
         layer.triggerRepaint()
 

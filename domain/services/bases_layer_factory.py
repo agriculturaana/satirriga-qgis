@@ -54,7 +54,7 @@ _SCHEMAS = {
 
 _LAYER_NAMES = {
     "municipios": "Municipios",
-    "bacias": "Bacias Hidrograficas",
+    "bacias": "Bacias Fiscalização",
     "empreendimentos": "Empreendimentos",
 }
 

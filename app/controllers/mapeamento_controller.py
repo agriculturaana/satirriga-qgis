@@ -719,7 +719,9 @@ class MapeamentoController(QObject):
 
         elif request_id in self._pending_compare_ids:
             zonal_id, batch_uuid = self._pending_compare_ids.pop(request_id)
-            # body é bytes (FlatGeobuf binário)
+            # body é bytes (GeoPackage binario — backend migrou de FGB para
+            # GPKG via ogr2ogr para evitar bug do PostGIS 3.4.x ST_AsFlatGeobuf).
+            # Nome do signal preservado por compatibilidade.
             self.compare_fgb_ready.emit(zonal_id, batch_uuid, body)
 
         elif request_id in self._pending_overlay_ids:
