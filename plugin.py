@@ -55,6 +55,8 @@ class SatIrrigaPlugin:
         self._tile_auth_set = False        # Preprocessor de auth para tiles base
         self._tile_auth_processor_id = None  # ID do preprocessor (QGIS >=3.26)
         self._tile_auth_api_host = None    # Host alvo do preprocessor
+        self._bases_service = None         # Lazy: GET /api/bases/:layer?bbox=...
+        self._base_layers = {}             # layer_id -> QgsVectorLayer
         self._initialized = False
 
     def _ensure_initialized(self):
@@ -99,6 +101,17 @@ class SatIrrigaPlugin:
             http_client=self._http_client,
             config_repo=self._config_repo,
         )
+
+        from .infra.services.bases_service import BasesService
+        self._bases_service = BasesService(
+            http_client=self._http_client,
+            config_repo=self._config_repo,
+            parent=None,
+        )
+        self._bases_service.layer_loaded.connect(self._on_base_layer_loaded)
+        self._bases_service.layer_failed.connect(self._on_base_layer_failed)
+        # layer_id -> QgsVectorLayer (gerenciado por _add_geojson_base_layers)
+        self._base_layers = {}
 
         self._initialized = True
 
@@ -234,6 +247,21 @@ class SatIrrigaPlugin:
                 self._auth_controller.cleanup()
             except (RuntimeError, TypeError):
                 pass
+
+        # Cleanup bases service (desconecta sinais; QObject sera coletado)
+        if self._bases_service:
+            try:
+                self._bases_service.cleanup()
+                self._bases_service.layer_loaded.disconnect(
+                    self._on_base_layer_loaded
+                )
+                self._bases_service.layer_failed.disconnect(
+                    self._on_base_layer_failed
+                )
+            except (TypeError, RuntimeError):
+                pass
+            self._bases_service = None
+        self._base_layers.clear()
 
         # Remove interceptor de tiles base
         # QGIS >=3.26: removeRequestPreprocessor(id). QGIS <=3.24: passar None.
@@ -772,100 +800,171 @@ class SatIrrigaPlugin:
             node = base_group.addLayer(satellite)
             node.setItemVisibilityChecked(False)
 
-        # Vector tiles (limites geograficos) — preprocessor ja registrado em initGui
-        self._add_vector_tile_layers(base_group)
+        # Camadas-base (municipios/bacias/empreendimentos) via GeoJSON por bbox.
+        # Autenticacao do GeoJSON e feita pelo HttpClient (AuthInterceptor) —
+        # nao usa o tile_auth preprocessor (que continua valido para XYZ raster).
+        self._add_geojson_base_layers(base_group)
 
         base_group.setExpanded(False)
 
-    def _add_vector_tile_layers(self, base_group):
-        """Adiciona camadas de limites via Vector Tiles MVT autenticados."""
+    def _add_geojson_base_layers(self, base_group):
+        """Cria 3 QgsVectorLayer (memory) e dispara fetch inicial por bbox.
+
+        Substitui o antigo pipeline MVT (descontinuado no servidor). Cada
+        camada parte vazia, recebe features apos o GET /api/bases/:layer?bbox=...
+        e oferece acao 'Atualizar com viewport atual' no menu de contexto.
+        """
         try:
-            from qgis.core import (
-                QgsProject,
-                QgsVectorTileLayer,
-                QgsVectorTileBasicRenderer,
-                QgsVectorTileBasicRendererStyle,
-            )
-            from qgis.core import QgsFillSymbol, QgsWkbTypes
-        except ImportError:
+            from .domain.services import bases_layer_factory
+        except ImportError as exc:
             self._log(
-                "QgsVectorTileLayer nao disponivel nesta versao do QGIS",
-                Qgis.Warning,
+                f"Falha ao importar bases_layer_factory: {exc}",
+                Qgis.Critical,
             )
             return
 
-        api_base = self._config_repo.get("api_base_url").rstrip("/")
+        from qgis.core import QgsAction, QgsProject
 
-        configs = [
-            {
-                "id": "municipios",
-                "name": "Municípios",
-                "zmin": 4, "zmax": 14,
-                "stroke_color": "#7f8c8d",
-                "stroke_width": "0.4",
-                "stroke_style": "dash",
-                "fill": False,
-            },
-            {
-                "id": "bacias",
-                "name": "Bacias Hidrográficas",
-                "zmin": 4, "zmax": 6,
-                "stroke_color": "#2980b9",
-                "stroke_width": "0.6",
-                "stroke_style": "solid",
-                "fill": False,
-            },
-            {
-                "id": "empreendimentos",
-                "name": "Empreendimentos",
-                "zmin": 6, "zmax": 8,
-                "stroke_color": "#e67e22",
-                "stroke_width": "0.5",
-                "stroke_style": "solid",
-                "fill": True,
-                "fill_color": "230,126,34,38",
-            },
-        ]
+        layer_ids = ("municipios", "bacias", "empreendimentos")
 
-        for cfg in configs:
-            tile_url = (
-                f"{api_base}/bases/tiles/{cfg['id']}"
-                "/{z}/{x}/{y}.pbf"
-            )
-            uri = f"type=xyz&url={tile_url}&zmin={cfg['zmin']}&zmax={cfg['zmax']}"
-
-            vtl = QgsVectorTileLayer(uri, cfg["name"])
-            if not vtl.isValid():
+        for layer_id in layer_ids:
+            try:
+                layer = bases_layer_factory.create_empty_layer(layer_id)
+            except Exception as exc:  # noqa: BLE001
                 self._log(
-                    f"Falha ao criar camada base: {cfg['name']}",
+                    f"Falha ao criar camada base '{layer_id}': {exc}",
                     Qgis.Warning,
                 )
                 continue
 
-            # Estilo: poligono com borda colorida
-            props = {
-                "color": cfg.get("fill_color", "0,0,0,0") if cfg["fill"] else "0,0,0,0",
-                "outline_color": cfg["stroke_color"],
-                "outline_width": cfg["stroke_width"],
-                "outline_style": cfg["stroke_style"],
-            }
-            symbol = QgsFillSymbol.createSimple(props)
+            # Acao no menu de contexto da camada: recarregar usando o
+            # extent atual do canvas. Reutiliza este mesmo plugin via
+            # qgis.utils.plugins['satirriga_qgis'].
+            action = QgsAction(
+                QgsAction.GenericPython,
+                "Atualizar com viewport atual",
+                (
+                    "from qgis.utils import plugins\n"
+                    "plugin = plugins.get('satirriga_qgis')\n"
+                    "if plugin is not None:\n"
+                    f"    plugin.refresh_base_layer('{layer_id}')\n"
+                ),
+            )
+            action.setActionScopes({"Layer"})
+            layer.actions().addAction(action)
 
-            style = QgsVectorTileBasicRendererStyle()
-            style.setGeometryType(QgsWkbTypes.PolygonGeometry)
-            style.setLayerName(cfg["id"])
-            style.setSymbol(symbol)
-            style.setEnabled(True)
-            style.setMinZoomLevel(cfg["zmin"])
-            style.setMaxZoomLevel(18)
-
-            renderer = QgsVectorTileBasicRenderer()
-            renderer.setStyles([style])
-            vtl.setRenderer(renderer)
-
-            QgsProject.instance().addMapLayer(vtl, False)
-            node = base_group.addLayer(vtl)
+            QgsProject.instance().addMapLayer(layer, False)
+            node = base_group.addLayer(layer)
             node.setItemVisibilityChecked(False)
+            self._base_layers[layer_id] = layer
+
+        # Fetch inicial para o extent corrente do canvas.
+        self._refresh_all_base_layers()
+
+    def refresh_base_layer(self, layer_id: str):
+        """Recarrega uma camada-base com o extent atual do canvas.
+
+        Exposto como entrada publica para a QgsAction registrada no menu
+        de contexto da camada.
+        """
+        from .domain.services import bases_layer_factory
+
+        layer = self._base_layers.get(layer_id)
+        if layer is None or self._bases_service is None:
+            return
+
+        bbox = self._canvas_bbox_4674()
+        if bbox is None:
+            self.iface.messageBar().pushWarning(
+                PLUGIN_NAME,
+                "Nao foi possivel determinar o extent do canvas.",
+            )
+            return
+
+        if not bases_layer_factory.is_bbox_within_cap(layer_id, bbox):
+            cap = bases_layer_factory.MAX_BBOX_DEG2[layer_id]
+            self.iface.messageBar().pushWarning(
+                PLUGIN_NAME,
+                (
+                    f"Aproxime o zoom — a area visivel excede o limite da "
+                    f"camada '{bases_layer_factory.display_name(layer_id)}' "
+                    f"({cap:.0f} graus^2)."
+                ),
+            )
+            return
+
+        self._bases_service.fetch(layer_id, bbox)
+
+    def _refresh_all_base_layers(self):
+        """Dispara fetch das 3 camadas-base com o extent atual."""
+        from .domain.services import bases_layer_factory
+
+        bbox = self._canvas_bbox_4674()
+        if bbox is None:
+            return
+
+        for layer_id in self._base_layers:
+            if not bases_layer_factory.is_bbox_within_cap(layer_id, bbox):
+                # Sem warning aqui (carga inicial em zoom baixo nao deve
+                # poluir a UI). A acao manual valida e avisa.
+                continue
+            self._bases_service.fetch(layer_id, bbox)
+
+    def _canvas_bbox_4674(self):
+        """Retorna o extent atual do canvas transformado para EPSG:4674.
+
+        Retorna None se a transformacao falhar (CRS invalido, etc.).
+        """
+        from qgis.core import (
+            QgsCoordinateReferenceSystem,
+            QgsCoordinateTransform,
+            QgsProject,
+        )
+
+        canvas = self.iface.mapCanvas()
+        extent = canvas.extent()
+        src_crs = canvas.mapSettings().destinationCrs()
+        dst_crs = QgsCoordinateReferenceSystem("EPSG:4674")
+
+        try:
+            if src_crs == dst_crs:
+                target = extent
+            else:
+                xform = QgsCoordinateTransform(
+                    src_crs, dst_crs, QgsProject.instance(),
+                )
+                target = xform.transformBoundingBox(extent)
+        except Exception as exc:  # noqa: BLE001
+            self._log(
+                f"Falha ao transformar bbox para 4674: {exc}",
+                Qgis.Warning,
+            )
+            return None
+
+        return (
+            target.xMinimum(),
+            target.yMinimum(),
+            target.xMaximum(),
+            target.yMaximum(),
+        )
+
+    def _on_base_layer_loaded(self, layer_id: str, feature_collection: dict):
+        from .domain.services import bases_layer_factory
+
+        layer = self._base_layers.get(layer_id)
+        if layer is None:
+            return
+        count = bases_layer_factory.populate(layer, feature_collection)
+        self._log(
+            f"Camada base '{layer_id}' atualizada: {count} feature(s)",
+        )
+
+    def _on_base_layer_failed(self, layer_id: str, error_msg: str):
+        self._log(
+            f"Camada base '{layer_id}' falhou: {error_msg}",
+            Qgis.Warning,
+        )
+        self.iface.messageBar().pushWarning(PLUGIN_NAME, error_msg)
 
     def _on_zonal_download_completed(self, gpkg_path, zonal_id, catalogo_meta,
                                      camadas_tab):
