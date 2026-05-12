@@ -3,7 +3,7 @@
 import os
 from datetime import datetime
 
-from qgis.PyQt.QtCore import Qt, QSize, QTimer
+from qgis.PyQt.QtCore import Qt, QSize, QTimer, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QIcon, QTextDocument, QFontMetrics
 from qgis.PyQt.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -17,6 +17,7 @@ from ..theme import SectionHeader
 from ..icon_utils import tinted_icon
 
 from ...domain.models.enums import ZonalStatusEnum, DownloadOrigin
+from ...domain.services.mapeamento_service import format_metodo_label
 
 _ICONS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -41,6 +42,8 @@ _SEARCH_DEBOUNCE_MS = 400
 
 class MapeamentosTab(QWidget):
     """Catálogo de zonais disponíveis — layout em cards com filtros e paginação server-side."""
+
+    inspect_toggled = pyqtSignal(bool)
 
     def __init__(self, state, mapeamento_controller, parent=None):
         super().__init__(parent)
@@ -79,6 +82,24 @@ class MapeamentosTab(QWidget):
 
         # --- Header ---
         section_header = SectionHeader("Mapeamentos", "disponíveis para edição")
+
+        self._inspect_btn = QToolButton()
+        self._inspect_btn.setText("Inspecionar pixel")
+        self._inspect_btn.setCheckable(True)
+        self._inspect_btn.setToolTip(
+            "Ativa inspeção pontual de índices espectrais (NDVI, NDWI, EVI, "
+            "SAVI, MNDWI, Albedo). Clique no mapa após ativar."
+        )
+        self._inspect_btn.setStyleSheet(
+            "QToolButton { padding: 3px 8px; border: 1px solid palette(mid); "
+            "border-radius: 4px; font-size: 11px; background: palette(base); }"
+            "QToolButton:checked { background-color: #1976D2; color: white; "
+            "border-color: #1565C0; font-weight: bold; }"
+            "QToolButton:hover:!checked { background-color: palette(midlight); }"
+        )
+        self._inspect_btn.toggled.connect(self.inspect_toggled.emit)
+        section_header.add_widget(self._inspect_btn)
+
         self._refresh_btn = QPushButton(QIcon(os.path.join(_ICONS_DIR, "action_refresh.svg")), "Atualizar")
         self._refresh_btn.setIconSize(QSize(14, 14))
         self._refresh_btn.setFixedWidth(90)
@@ -430,7 +451,7 @@ class MapeamentosTab(QWidget):
             except (ValueError, AttributeError):
                 data_ref = item.data_referencia[:10]
 
-        metodo_label = self._format_metodo(item.metodo_apply) if item.metodo_apply else "—"
+        metodo_label = format_metodo_label(item.metodo_apply)
         meta = QLabel(f"{data_ref}  ·  {metodo_label}")
         meta.setStyleSheet("font-size: 11px; color: #757575;")
         row2.addWidget(meta)
@@ -472,7 +493,7 @@ class MapeamentosTab(QWidget):
 
         layout.addWidget(desc_label)
 
-        # --- Linha 4: autor + features/área ---
+        # --- Linha 4: autor + features ---
         row4 = QHBoxLayout()
         row4.setSpacing(6)
 
@@ -482,7 +503,7 @@ class MapeamentosTab(QWidget):
 
         row4.addStretch()
 
-        feat_area = f"{item.result_count or 0} feições  ·  {(item.total_area_ha or 0):,.1f} ha"
+        feat_area = f"{item.result_count or 0} feições"
         stats = QLabel(feat_area)
         stats.setStyleSheet("font-size: 11px; color: #757575;")
         row4.addWidget(stats)
@@ -681,18 +702,6 @@ class MapeamentosTab(QWidget):
     # ================================================================
     # Helpers
     # ================================================================
-
-    @staticmethod
-    def _format_metodo(metodo_apply):
-        """Converte metodoApply em label legível."""
-        labels = {
-            "METODO_1": "Fatiamento do índice de Vegetação",
-            "METODO_2_DISCRETO": "Detecção de mudança (discreto)",
-            "METODO_2_FUZZY": "Detecção de mudança (fuzzy)",
-            "METODO_3": "Método 3",
-            "AUTOMATICO": "Automático",
-        }
-        return labels.get(metodo_apply, metodo_apply)
 
     def _on_notifications_loaded(self, notifications):
         """Exibe notificações de pareceres acima do catálogo."""

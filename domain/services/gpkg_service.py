@@ -58,6 +58,19 @@ def gpkg_path_for_zonal(base_dir: str, zonal_id: int, origin: str = None) -> str
     return os.path.join(folder, f"zonal_{zonal_id}.gpkg")
 
 
+def gpkg_path_for_mapeamento_homologado(base_dir: str, mapeamento_id: int) -> str:
+    """Caminho do GPKG consolidado de um mapeamento homologado (somente leitura).
+
+    Estrutura: {base_dir}/homologacao/mapeamento_<id>/mapeamento_<id>.gpkg
+    Reaproveita a pasta 'homologacao' ja usada pelos GPKGs zonais somente
+    leitura, mantendo a segregacao por origin no disco.
+    """
+    origin_key = DownloadOrigin.HOMOLOGACAO.value
+    folder = os.path.join(base_dir, origin_key, f"mapeamento_{mapeamento_id}")
+    os.makedirs(folder, exist_ok=True)
+    return os.path.join(folder, f"mapeamento_{mapeamento_id}.gpkg")
+
+
 def sidecar_path(gpkg_path_str: str) -> str:
     """Retorna caminho do sidecar .satirriga.json ao lado do GPKG."""
     return os.path.join(os.path.dirname(gpkg_path_str), SIDECAR_FILENAME)
@@ -216,6 +229,8 @@ def list_local_gpkgs(base_dir: str) -> list:
                 entry["descricao"] = sc_data["descricao"]
             if sc_data.get("jobId"):
                 entry["job_id"] = sc_data["jobId"]
+            if sc_data.get("metodoApply"):
+                entry["metodo_apply"] = sc_data["metodoApply"]
 
         result.append(entry)
 

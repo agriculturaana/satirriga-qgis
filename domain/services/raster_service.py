@@ -51,7 +51,7 @@ _BAND_DEFAULTS = {
     "original":    VisParams(band="original", min_val=0, max_val=3000, gamma=1.2),
     "NDVI":        VisParams(band="NDVI", min_val=0, max_val=0.8, palette="RDYLGN"),
     "NDWI":        VisParams(band="NDWI", min_val=-0.7, max_val=0.4, palette="BLUES"),
-    "albedo":      VisParams(band="albedo", min_val=0.1, max_val=1.6, palette="HOT_R"),
+    "albedo":      VisParams(band="albedo", min_val=-0.7, max_val=0.4, palette="ALBEDO"),
     "ndvi_diff":   VisParams(band="NDVI", palette="SPECTRAL"),
     "ndwi_diff":   VisParams(band="NDWI", palette="SPECTRAL"),
     "albedo_diff": VisParams(band="albedo", palette="COOLWARM"),

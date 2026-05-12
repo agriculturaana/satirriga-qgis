@@ -325,7 +325,7 @@ class HomologacaoTab(QWidget):
 
         layout.addWidget(desc_label)
 
-        # --- Linha 4: autor + features/área ---
+        # --- Linha 4: autor + features ---
         row4 = QHBoxLayout()
         row4.setSpacing(6)
 
@@ -335,7 +335,7 @@ class HomologacaoTab(QWidget):
 
         row4.addStretch()
 
-        feat_area = f"{item.result_count or 0} feições  ·  {(item.total_area_ha or 0):,.1f} ha"
+        feat_area = f"{item.result_count or 0} feições"
         stats = QLabel(feat_area)
         stats.setStyleSheet("font-size: 11px; color: #757575;")
         row4.addWidget(stats)
@@ -392,19 +392,47 @@ class HomologacaoTab(QWidget):
         row_secondary.setSpacing(4)
         row_secondary.addStretch()
 
-        btn_download = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_download.svg"), "#FFFFFF"), "Baixar")
-        btn_download.setIconSize(QSize(14, 14))
-        btn_download.setToolTip("Baixar resultado zonal como GeoPackage editável")
-        btn_download.setStyleSheet(
-            "QPushButton { background-color: #1976D2; color: white;"
-            " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
-            "QPushButton:hover { background-color: #1565C0; }"
-            "QPushButton:disabled { background-color: #90CAF9; }"
+        is_homologado_card = (
+            item.status == "HOMOLOGADO" and item.mapeamento_id is not None
         )
-        btn_download.clicked.connect(
-            lambda _, zid=item.id, ci=item: self._on_download(zid, ci)
-        )
-        row_secondary.addWidget(btn_download)
+
+        if is_homologado_card:
+            btn_download = QPushButton(
+                tinted_icon(os.path.join(_ICONS_DIR, "action_download.svg"), "#FFFFFF"),
+                "Baixar Mapeamento Homologado",
+            )
+            btn_download.setIconSize(QSize(14, 14))
+            btn_download.setToolTip(
+                "Baixar GeoPackage consolidado do mapeamento homologado (somente leitura)"
+            )
+            btn_download.setStyleSheet(
+                "QPushButton { background-color: #2E7D32; color: white;"
+                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #1B5E20; }"
+                "QPushButton:disabled { background-color: #A5D6A7; }"
+            )
+            btn_download.clicked.connect(
+                lambda _, mid=item.mapeamento_id, ci=item:
+                    self._on_download_mapeamento_homologado(mid, ci)
+            )
+            row_secondary.addWidget(btn_download)
+        else:
+            btn_download = QPushButton(
+                tinted_icon(os.path.join(_ICONS_DIR, "action_download.svg"), "#FFFFFF"),
+                "Baixar",
+            )
+            btn_download.setIconSize(QSize(14, 14))
+            btn_download.setToolTip("Baixar resultado zonal como GeoPackage editável")
+            btn_download.setStyleSheet(
+                "QPushButton { background-color: #1976D2; color: white;"
+                " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
+                "QPushButton:hover { background-color: #1565C0; }"
+                "QPushButton:disabled { background-color: #90CAF9; }"
+            )
+            btn_download.clicked.connect(
+                lambda _, zid=item.id, ci=item: self._on_download(zid, ci)
+            )
+            row_secondary.addWidget(btn_download)
 
         if item.status == "HOMOLOGADO":
             btn_retirar = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_rotate_ccw.svg"), "#FFFFFF"), "Retirar")
@@ -439,6 +467,8 @@ class HomologacaoTab(QWidget):
         card.setLayout(layout)
         card._download_btn = btn_download
         card._zonal_id = item.id
+        card._mapeamento_id = item.mapeamento_id
+        card._is_homologado_card = is_homologado_card
         return card
 
     # ================================================================
@@ -555,6 +585,12 @@ class HomologacaoTab(QWidget):
             origin=DownloadOrigin.HOMOLOGACAO.value,
         )
 
+    def _on_download_mapeamento_homologado(self, mapeamento_id, catalogo_item):
+        """Baixa o GPKG consolidado do mapeamento homologado (read-only)."""
+        self._controller.download_mapeamento_homologado(
+            mapeamento_id, catalogo_item=catalogo_item,
+        )
+
     def _on_parecer(self, zonal_id):
         from ..dialogs.parecer_dialog import ParecerDialog
 
@@ -638,6 +674,20 @@ class HomologacaoTab(QWidget):
                 if widget and hasattr(widget, "_zonal_id") and widget._zonal_id == target_zonal_id:
                     widget._download_btn.setEnabled(not is_loading)
                     break
+        elif operation.startswith("download_homologado:"):
+            try:
+                target_mapeamento_id = int(operation.split(":", 1)[1])
+            except (TypeError, ValueError):
+                return
+            # Desabilita o botao "Baixar Mapeamento Homologado" em TODOS os
+            # cards do mesmo mapeamento (varios zonals podem compartilhar id).
+            for row in range(self._card_list.count()):
+                widget = self._card_list.itemWidget(self._card_list.item(row))
+                if (widget
+                        and getattr(widget, "_is_homologado_card", False)
+                        and getattr(widget, "_mapeamento_id", None)
+                        == target_mapeamento_id):
+                    widget._download_btn.setEnabled(not is_loading)
 
     def _on_error(self, operation, message):
         if operation in ("catalogo_homologacao", "parecer"):

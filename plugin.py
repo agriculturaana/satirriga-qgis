@@ -45,6 +45,8 @@ class SatIrrigaPlugin:
         self._timeseries_controller = None
         self._timeseries_map_tool = None
         self._timeseries_tab = None
+        self._pixel_inspect_controller = None
+        self._pixel_inspect_dialog = None
         self._config_controller = None
         self._camadas_tab = None
         self._upload_history_tab = None
@@ -228,6 +230,20 @@ class SatIrrigaPlugin:
             self._timeseries_map_tool = None
         self._timeseries_tab = None
 
+        # Cleanup inspecao pontual de indices
+        if self._pixel_inspect_controller:
+            try:
+                self._pixel_inspect_controller.cleanup()
+            except (RuntimeError, AttributeError):
+                pass
+            self._pixel_inspect_controller = None
+        if self._pixel_inspect_dialog:
+            try:
+                self._pixel_inspect_dialog.deleteLater()
+            except (RuntimeError, AttributeError):
+                pass
+            self._pixel_inspect_dialog = None
+
         # Cleanup controllers
         if self._mapeamento_controller:
             try:
@@ -330,6 +346,21 @@ class SatIrrigaPlugin:
 
     def _on_dock_closed(self):
         self.plugin_is_active = False
+        if self._pixel_inspect_controller:
+            self._pixel_inspect_controller.deactivate()
+        if self._pixel_inspect_dialog and self._pixel_inspect_dialog.isVisible():
+            self._pixel_inspect_dialog.hide()
+
+    def _on_pixel_inspect_toggled(self, checked):
+        if not self._pixel_inspect_controller:
+            return
+        if checked:
+            self._pixel_inspect_controller.activate()
+        else:
+            self._pixel_inspect_controller.deactivate()
+            if self._pixel_inspect_dialog:
+                self._pixel_inspect_dialog.hide()
+                self._pixel_inspect_controller.clear_marker()
 
     def _on_error_occurred(self, operation, message):
         """Exibe dialog de erro intuitivo para o usuario."""
@@ -372,6 +403,42 @@ class SatIrrigaPlugin:
             mapeamento_controller=self._mapeamento_controller,
         )
         self.dock.set_page_widget(SatIrrigaDock.PAGE_MAPEAMENTOS, self._mapeamentos_tab)
+
+        # Inspecao pontual de indices espectrais (controller + dialog flutuante)
+        from .app.controllers.pixel_inspect_controller import PixelInspectController
+        from .ui.dialogs.pixel_inspect_dialog import PixelInspectDialog
+
+        self._pixel_inspect_controller = PixelInspectController(
+            canvas=self.iface.mapCanvas(),
+            http_client=self._http_client,
+            config_repo=self._config_repo,
+        )
+        self._pixel_inspect_dialog = PixelInspectDialog(
+            parent=self.iface.mainWindow(),
+        )
+        self._pixel_inspect_dialog.bind_clear_marker(
+            self._pixel_inspect_controller.clear_marker
+        )
+        self._connect(
+            self._mapeamentos_tab.inspect_toggled,
+            self._on_pixel_inspect_toggled,
+        )
+        self._connect(
+            self._pixel_inspect_controller.indexes_loading,
+            self._pixel_inspect_dialog.show_loading,
+        )
+        self._connect(
+            self._pixel_inspect_controller.indexes_ready,
+            self._pixel_inspect_dialog.show_results,
+        )
+        self._connect(
+            self._pixel_inspect_controller.indexes_error,
+            lambda msg: self._pixel_inspect_dialog.show_error(None, None, msg),
+        )
+        self._connect(
+            self._pixel_inspect_controller.indexes_no_images,
+            self._pixel_inspect_dialog.show_no_images,
+        )
 
         # Camadas: page 2
         self._camadas_tab = CamadasTab(
@@ -435,6 +502,17 @@ class SatIrrigaPlugin:
         )
         self._connect(
             self._mapeamento_controller.zonal_download_completed, download_slot
+        )
+
+        # Mapeamento homologado (read-only) -> carregar layer no QGIS
+        homologado_slot = (
+            lambda path, mid, meta:
+                self._on_mapeamento_homologado_download_completed(path, mid, meta)
+        )
+        self._connect(
+            self._mapeamento_controller
+            .mapeamento_homologado_download_completed,
+            homologado_slot,
         )
 
         # V2: upload progress bridge -> state
@@ -1082,6 +1160,190 @@ class SatIrrigaPlugin:
 
         # Busca dados de overlay para enriquecer dialog de atributos
         self._mapeamento_controller.fetch_overlay_data(zonal_id)
+
+    def _on_mapeamento_homologado_download_completed(self, gpkg_path,
+                                                     mapeamento_id,
+                                                     catalogo_meta):
+        """Carrega GPKG consolidado de um mapeamento homologado no projeto.
+
+        Cria grupo ``SatIrriga / Homologacao / Mapeamento #<id> - <desc>`` e
+        marca a camada como somente leitura. Caso ja exista um grupo para o
+        mesmo mapeamento dentro de Homologacao, remove-o (e suas camadas)
+        antes de recriar, garantindo estado limpo a cada redownload.
+        """
+        from qgis.core import QgsProject, QgsVectorLayer, QgsFillSymbol
+        from .domain.services.gpkg_service import (
+            SATIRRIGA_ROOT_GROUP,
+            origin_group_label,
+        )
+        from .domain.models.enums import DownloadOrigin
+
+        origin_key = DownloadOrigin.HOMOLOGACAO.value
+        origin_label = origin_group_label(origin_key)
+
+        descricao = (catalogo_meta or {}).get("descricao", "")
+        if descricao:
+            from qgis.PyQt.QtGui import QTextDocument
+            doc = QTextDocument()
+            doc.setHtml(descricao)
+            plain = doc.toPlainText().strip()
+            short_desc = (plain[:60] + "...") if len(plain) > 60 else plain
+        else:
+            short_desc = ""
+        suffix = (
+            f"Mapeamento #{mapeamento_id} - {short_desc}"
+            if short_desc else f"Mapeamento #{mapeamento_id}"
+        )
+
+        root = QgsProject.instance().layerTreeRoot()
+        parent = root.findGroup(SATIRRIGA_ROOT_GROUP)
+        if not parent:
+            parent = root.addGroup(SATIRRIGA_ROOT_GROUP)
+        origin_group = parent.findGroup(origin_label)
+        if not origin_group:
+            origin_group = parent.addGroup(origin_label)
+
+        self._remove_mapeamento_homologado_group(origin_group, mapeamento_id)
+
+        # Descobre sublayers (GPKG consolidado pode ter mais de uma).
+        sublayer_names = self._discover_gpkg_layer_names(gpkg_path)
+        if not sublayer_names:
+            self._log(
+                f"GPKG do mapeamento homologado nao contem camadas: {gpkg_path}",
+                Qgis.Warning,
+            )
+            self.iface.messageBar().pushWarning(
+                PLUGIN_NAME,
+                "Mapeamento homologado baixado, mas o arquivo nao contem camadas.",
+            )
+            return
+
+        group = origin_group.addGroup(suffix)
+        group.setCustomProperty(
+            "satirriga/mapeamento_homologado_id", int(mapeamento_id),
+        )
+        group.setCustomProperty("satirriga/origin", origin_key)
+
+        loaded_layers = []
+        for sublayer_name in sublayer_names:
+            layer_label = (
+                f"Mapeamento #{mapeamento_id} - {sublayer_name}"
+                if len(sublayer_names) > 1
+                else f"Mapeamento #{mapeamento_id} (homologado)"
+            )
+            uri = f"{gpkg_path}|layername={sublayer_name}"
+            layer = QgsVectorLayer(uri, layer_label, "ogr")
+            if not layer.isValid():
+                self._log(
+                    f"Camada invalida no GPKG homologado: {sublayer_name} "
+                    f"(uri={uri}) — {layer.error().summary()}",
+                    Qgis.Warning,
+                )
+                continue
+
+            symbol = QgsFillSymbol.createSimple({})
+            sl = symbol.symbolLayer(0)
+            sl.setBrushStyle(Qt.NoBrush)
+            sl.setStrokeColor(QColor("#2E7D32"))
+            sl.setStrokeWidth(0.8)
+            if layer.renderer() is not None:
+                layer.renderer().setSymbol(symbol)
+
+            # Trava edicao: GPKG consolidado de homologacao nao deve ser
+            # alterado pelo cliente.
+            layer.setReadOnly(True)
+
+            QgsProject.instance().addMapLayer(layer, False)
+            group.insertLayer(0, layer)
+            layer.triggerRepaint()
+            loaded_layers.append(layer)
+
+        if not loaded_layers:
+            # Nenhuma sublayer abriu como QgsVectorLayer — remove grupo orfao.
+            origin_group.removeChildNode(group)
+            self._log(
+                f"Falha ao carregar todas as camadas do GPKG homologado: {gpkg_path}",
+                Qgis.Warning,
+            )
+            self.iface.messageBar().pushWarning(
+                PLUGIN_NAME,
+                "Nao foi possivel carregar o GeoPackage do mapeamento homologado.",
+            )
+            return
+
+        self._log(
+            f"Mapeamento homologado carregado ({len(loaded_layers)} camada(s)): "
+            f"{gpkg_path}"
+        )
+
+        if self._config_repo.get("auto_zoom_on_load"):
+            self.iface.mapCanvas().setExtent(loaded_layers[0].extent())
+            self.iface.mapCanvas().refresh()
+
+    def _discover_gpkg_layer_names(self, gpkg_path):
+        """Enumera nomes das camadas vetoriais dentro de um GPKG.
+
+        Usa osgeo.ogr (mesma dependencia ja usada em download_task) e
+        ignora camadas sem geometria. Retorna lista vazia se o GPKG for
+        invalido ou nao contiver camadas vetoriais.
+        """
+        try:
+            from osgeo import ogr, gdal
+        except ImportError:
+            return []
+        try:
+            gdal.UseExceptions()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            ds = ogr.Open(gpkg_path, 0)
+        except Exception as exc:  # noqa: BLE001
+            self._log(
+                f"ogr.Open falhou para GPKG homologado {gpkg_path}: {exc}",
+                Qgis.Warning,
+            )
+            return []
+        if ds is None:
+            return []
+        names = []
+        try:
+            for i in range(ds.GetLayerCount()):
+                lyr = ds.GetLayerByIndex(i)
+                if lyr is None:
+                    continue
+                if lyr.GetGeomType() == ogr.wkbNone:
+                    continue
+                names.append(lyr.GetName())
+        finally:
+            ds = None
+        return names
+
+    def _remove_mapeamento_homologado_group(self, parent_group, mapeamento_id):
+        """Remove subgrupo de um mapeamento homologado dentro de ``parent_group``.
+
+        Identifica por ``customProperty`` ``satirriga/mapeamento_homologado_id``
+        e remove tambem as camadas contidas, para evitar orfaos.
+        """
+        from qgis.core import QgsProject
+        try:
+            target_id = int(mapeamento_id)
+        except (TypeError, ValueError):
+            return
+        project = QgsProject.instance()
+        for child in list(parent_group.children()):
+            prop = child.customProperty("satirriga/mapeamento_homologado_id")
+            if prop is None:
+                continue
+            try:
+                if int(prop) != target_id:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            for leaf in child.findLayers():
+                layer = leaf.layer()
+                if layer is not None:
+                    project.removeMapLayer(layer.id())
+            parent_group.removeChildNode(child)
 
     def _on_raster_layers_ready(self, hierarchy):
         """Cria arvore hierarquica de camadas raster XYZ no QGIS.

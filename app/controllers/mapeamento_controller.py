@@ -17,6 +17,8 @@ class MapeamentoController(QObject):
 
     # Signals V2 (zonal)
     zonal_download_completed = pyqtSignal(str, int, object)  # gpkg_path, zonal_id, meta (inclui 'origin')
+    mapeamento_homologado_download_completed = pyqtSignal(str, int, object)
+    # gpkg_path, mapeamento_id, meta — download consolidado read-only
     zonal_upload_completed = pyqtSignal(str, int)    # gpkg_path, zonal_id
     versions_loaded = pyqtSignal(int, dict)          # zonal_id, versions_data
     compare_fgb_ready = pyqtSignal(int, str, bytes)  # zonal_id, batch_uuid, fgb_bytes
@@ -971,6 +973,97 @@ class MapeamentoController(QObject):
             self._state.set_error(f"download:{zonal_id}", message)
             QgsMessageLog.logMessage(
                 f"Download zonal falhou: {message}", PLUGIN_NAME, Qgis.Warning,
+            )
+
+    # ----------------------------------------------------------------
+    # Download Mapeamento Homologado (read-only)
+    # ----------------------------------------------------------------
+
+    def download_mapeamento_homologado(self, mapeamento_id, catalogo_item=None):
+        """Inicia download do GPKG consolidado de um mapeamento homologado.
+
+        Acessa GET /mapeamento/homologados/gpkg?ids=<mapeamento_id> e grava
+        em ``{base_dir}/homologacao/mapeamento_<id>/mapeamento_<id>.gpkg``.
+        Sem checkout (read-only por definicao) — o GPKG nao participa do
+        fluxo de edicao zonal.
+        """
+        from ...infra.tasks.download_mapeamento_task import (
+            DownloadMapeamentoHomologadoTask,
+        )
+        from ...domain.services.gpkg_service import (
+            gpkg_base_dir,
+            gpkg_path_for_mapeamento_homologado,
+        )
+        from ...domain.models.enums import DownloadOrigin
+
+        if not self._state.is_authenticated or not self._token_provider:
+            self._state.set_error("download_homologado", "Nao autenticado")
+            return
+
+        token = self._token_provider()
+        if not token:
+            self._state.set_error("download_homologado", "Token nao disponivel")
+            return
+
+        download_url = self._api_url(
+            f"/mapeamento/homologados/gpkg?ids={int(mapeamento_id)}"
+        )
+        base_dir = gpkg_base_dir(self._config.get("gpkg_base_dir"))
+        output_path = gpkg_path_for_mapeamento_homologado(
+            base_dir, int(mapeamento_id),
+        )
+
+        catalogo_meta = {"origin": DownloadOrigin.HOMOLOGACAO.value}
+        if catalogo_item:
+            catalogo_meta.update({
+                "mapeamentoId": catalogo_item.mapeamento_id,
+                "dataReferencia": catalogo_item.data_referencia,
+                "descricao": catalogo_item.descricao,
+                "jobId": catalogo_item.job_id,
+                "metodoApply": catalogo_item.metodo_apply,
+            })
+
+        task = DownloadMapeamentoHomologadoTask(
+            download_url=download_url,
+            access_token=token,
+            gpkg_output_path=output_path,
+            mapeamento_id=int(mapeamento_id),
+            catalogo_meta=catalogo_meta,
+        )
+
+        task.signals.completed.connect(
+            lambda success, msg: self._on_mapeamento_homologado_download_completed(
+                success, msg, output_path, int(mapeamento_id), catalogo_meta,
+            )
+        )
+        task.signals.status_message.connect(
+            lambda msg: QgsMessageLog.logMessage(msg, PLUGIN_NAME, Qgis.Info)
+        )
+
+        self._active_tasks.append(task)
+        self._state.set_loading(f"download_homologado:{mapeamento_id}", True)
+        QgsApplication.taskManager().addTask(task)
+
+    def _on_mapeamento_homologado_download_completed(self, success, message,
+                                                     gpkg_path, mapeamento_id,
+                                                     catalogo_meta=None):
+        self._cleanup_finished_tasks()
+        self._state.set_loading(f"download_homologado:{mapeamento_id}", False)
+        if success:
+            self.mapeamento_homologado_download_completed.emit(
+                gpkg_path, mapeamento_id, catalogo_meta or {},
+            )
+            QgsMessageLog.logMessage(
+                f"Download mapeamento homologado concluido: {gpkg_path}",
+                PLUGIN_NAME, Qgis.Info,
+            )
+        else:
+            self._state.set_error(
+                f"download_homologado:{mapeamento_id}", message,
+            )
+            QgsMessageLog.logMessage(
+                f"Download mapeamento homologado falhou: {message}",
+                PLUGIN_NAME, Qgis.Warning,
             )
 
     # ----------------------------------------------------------------

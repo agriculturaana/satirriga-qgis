@@ -9,6 +9,7 @@ from domain.services.mapeamento_service import (
     parse_paginated_result,
     has_downloadable_metodo,
     has_processing_metodo,
+    format_metodo_label,
 )
 
 
@@ -66,3 +67,21 @@ class TestMapeamentoService:
             ],
         )
         assert has_processing_metodo(m) is True
+
+
+class TestFormatMetodoLabel:
+    def test_known_keys(self):
+        assert format_metodo_label("METODO_1") == "Fatiamento do índice de Vegetação"
+        assert format_metodo_label("METODO_2_DISCRETO") == "Detecção de mudança (discreto)"
+        assert format_metodo_label("METODO_2_FUZZY") == "Detecção de mudança (fuzzy)"
+        assert format_metodo_label("METODO_3") == "Método 3"
+        assert format_metodo_label("AUTOMATICO") == "Automático"
+
+    def test_none_returns_em_dash(self):
+        assert format_metodo_label(None) == "—"
+
+    def test_empty_returns_em_dash(self):
+        assert format_metodo_label("") == "—"
+
+    def test_unknown_key_returns_raw(self):
+        assert format_metodo_label("METODO_FUTURO") == "METODO_FUTURO"

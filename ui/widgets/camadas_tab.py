@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 
 from qgis.PyQt.QtCore import Qt, QSize
-from qgis.PyQt.QtGui import QColor, QIcon
+from qgis.PyQt.QtGui import QColor, QFontMetrics, QIcon, QTextDocument
 from qgis.PyQt.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QSizePolicy, QMessageBox,
@@ -13,6 +13,7 @@ from qgis.PyQt.QtWidgets import (
 from qgis.core import QgsProject, QgsVectorLayer, QgsMessageLog, Qgis
 
 from ...domain.models.enums import SyncStatusEnum, ZonalStatusEnum
+from ...domain.services.mapeamento_service import format_metodo_label
 from ...infra.config.settings import PLUGIN_NAME
 from ..theme import SectionHeader
 from ..icon_utils import tinted_icon
@@ -207,7 +208,7 @@ class CamadasTab(QWidget):
 
         layout.addLayout(row1)
 
-        # --- Linha 2: data + descrição ---
+        # --- Linha 2: data + método (espelha mapeamentos_tab._create_card) ---
         data_ref = "—"
         raw_date = gpkg_info.get("data_referencia")
         if raw_date:
@@ -217,11 +218,41 @@ class CamadasTab(QWidget):
             except (ValueError, AttributeError):
                 data_ref = str(raw_date)[:10]
 
-        descricao = gpkg_info.get("descricao") or f"Zonal {zonal_id or '?'}"
-        meta = QLabel(f"{data_ref}  ·  {descricao}")
+        metodo_label = format_metodo_label(gpkg_info.get("metodo_apply"))
+        meta = QLabel(f"{data_ref}  ·  {metodo_label}")
         meta.setStyleSheet("font-size: 11px; color: #757575;")
-        meta.setWordWrap(True)
         layout.addWidget(meta)
+
+        # --- Linha 3: descrição (HTML, máx 3 linhas, com tooltip) ---
+        desc_label = QLabel()
+        desc_label.setTextFormat(Qt.RichText)
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet("font-size: 11px; padding: 0;")
+        line_height = QFontMetrics(desc_label.font()).lineSpacing()
+        desc_label.setMaximumHeight(line_height * 3 + 4)
+
+        descricao_raw = gpkg_info.get("descricao") or ""
+        plain = ""
+        if descricao_raw:
+            doc = QTextDocument()
+            doc.setHtml(descricao_raw)
+            plain = doc.toPlainText().strip()
+
+        if plain:
+            fm = QFontMetrics(desc_label.font())
+            max_width = 400
+            displayed = []
+            for line in plain.split("\n"):
+                if len(displayed) >= 3:
+                    break
+                displayed.append(fm.elidedText(line, Qt.ElideRight, max_width))
+            desc_label.setText("<br>".join(displayed))
+            desc_label.setToolTip(plain)
+        else:
+            fallback = f"Zonal {zonal_id or '?'}"
+            desc_label.setText(f"<i style='color:#9E9E9E'>{fallback}</i>")
+
+        layout.addWidget(desc_label)
 
         # --- Linha 3: ações ---
         row3 = QHBoxLayout()
