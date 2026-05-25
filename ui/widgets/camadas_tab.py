@@ -275,7 +275,7 @@ class CamadasTab(QWidget):
             "QPushButton:hover { background-color: #1565C0; }"
         )
         btn_open.clicked.connect(
-            lambda _, p=path, zid=zonal_id: self._open_gpkg(p, zid)
+            lambda _, p=path, zid=zonal_id, m=mid: self._open_gpkg(p, zid, m)
         )
         row3.addWidget(btn_open)
 
@@ -635,9 +635,12 @@ class CamadasTab(QWidget):
     # Actions
     # ================================================================
 
-    def _open_gpkg(self, gpkg_path, zonal_id):
+    def _open_gpkg(self, gpkg_path, zonal_id, mapeamento_id=None):
         """Carrega GPKG como camada editável no QGIS com edit tracking."""
-        layer_name = f"Zonal {zonal_id}" if zonal_id else os.path.basename(gpkg_path)
+        if mapeamento_id:
+            layer_name = f"Mapeamento #{mapeamento_id}"
+        else:
+            layer_name = os.path.basename(gpkg_path)
 
         for existing in QgsProject.instance().mapLayers().values():
             if existing.source().split("|")[0] == gpkg_path:

@@ -1086,7 +1086,7 @@ class SatIrrigaPlugin:
                 short_desc = ""
             suffix = f"#{mapeamento_id} - {short_desc}" if short_desc else f"#{mapeamento_id}"
         else:
-            suffix = f"Zonal {zonal_id}"
+            suffix = "Mapeamento"
 
         root = QgsProject.instance().layerTreeRoot()
         parent = root.findGroup(SATIRRIGA_ROOT_GROUP)
@@ -1104,10 +1104,13 @@ class SatIrrigaPlugin:
         group.setCustomProperty("satirriga/origin", origin_key)
 
         metodo_label = self._format_metodo(metodo_apply)
-        layer_name = (
-            f"Zonal #{zonal_id} - {metodo_label}"
-            if metodo_label else f"Zonal #{zonal_id}"
-        )
+        if mapeamento_id:
+            layer_name = (
+                f"Mapeamento #{mapeamento_id} - {metodo_label}"
+                if metodo_label else f"Mapeamento #{mapeamento_id}"
+            )
+        else:
+            layer_name = metodo_label or "Mapeamento"
         layer = QgsVectorLayer(gpkg_path, layer_name, "ogr")
         if layer.isValid():
             # Estilo: somente borda laranja, sem preenchimento

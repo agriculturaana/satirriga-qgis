@@ -357,7 +357,7 @@ class UploadHistoryWidget(QWidget):
 
         for i, (uuid, path) in enumerate(zip(uuids, paths)):
             label = "A (base)" if i == 0 else "B (comparar)"
-            layer_name = f"Comparação {label} — Zonal {zonal_id} [{uuid[:8]}]"
+            layer_name = f"Comparação {label} [{uuid[:8]}]"
 
             layer = QgsVectorLayer(path, layer_name, "ogr")
             if not layer.isValid():

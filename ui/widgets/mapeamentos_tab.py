@@ -832,8 +832,7 @@ class MapeamentosTab(QWidget):
         from qgis.PyQt.QtWidgets import QMessageBox
         QMessageBox.information(
             self, "Mapeamento encerrado",
-            f"Zonal #{zonal_id} encerrado para homologação.\n"
-            f"Novo status: {new_status}",
+            f"Mapeamento encerrado para homologação.\nNovo status: {new_status}",
         )
         self._request_page()
 
