@@ -43,6 +43,20 @@ class TestRequest:
         url, _ = http.post_json.call_args[0]
         assert url == "https://api.test/api/mapeamento/tiles/get/indexs/images"
 
+    def test_inclui_id_imagens2_quando_ha_par(self):
+        service, http = _make_service()
+        service.request(["A", "B"], -15.5, -48.2, ["A2", ""])
+        _, body = http.post_json.call_args[0]
+        payload = json.loads(body)
+        assert payload["id_imagens2"] == ["A2", ""]
+
+    def test_omite_id_imagens2_quando_todas_vazias(self):
+        service, http = _make_service()
+        service.request(["A", "B"], -15.5, -48.2, ["", ""])
+        _, body = http.post_json.call_args[0]
+        payload = json.loads(body)
+        assert "id_imagens2" not in payload
+
 
 class TestParseResponse:
     def test_parses_array(self):
@@ -83,6 +97,20 @@ class TestCache:
         sentinel = ["dummy"]
         service.store(["A", "B"], 1.0, 2.0, sentinel)
         assert service.cached_for(["B", "A"], 1.0, 2.0) is sentinel
+
+    def test_key_preserva_pareamento_na_permutacao(self):
+        """Permutar a lista mantendo os PARES juntos ainda e cache hit."""
+        service, _ = _make_service()
+        sentinel = ["dummy"]
+        service.store(["A", "B"], 1.0, 2.0, sentinel, ["A2", "B2"])
+        assert service.cached_for(["B", "A"], 1.0, 2.0, ["B2", "A2"]) is sentinel
+
+    def test_pareamento_diferente_nao_e_cache_hit(self):
+        """delta_ndvi depende da imagem2 pareada — par diferente, chave diferente."""
+        service, _ = _make_service()
+        service.store(["A"], 1.0, 2.0, ["v1"], ["A2"])
+        assert service.cached_for(["A"], 1.0, 2.0, ["OUTRA"]) is None
+        assert service.cached_for(["A"], 1.0, 2.0) is None
 
     def test_key_rounds_coordinates(self):
         service, _ = _make_service()

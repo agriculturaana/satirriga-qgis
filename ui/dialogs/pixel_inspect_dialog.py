@@ -31,6 +31,9 @@ _INDEX_DEFS = [
     ("ndwi",   "NDWI",   "Água"),
     ("mndwi",  "MNDWI",  "Água modificado"),
     ("albedo", "Albedo", "Reflectância média"),
+    # Variacao do NDVI vs. imagem anterior pareada (metodos 2a/2b).
+    # A celula so aparece quando o backend retorna o delta.
+    ("delta_ndvi", "Δ NDVI", "Variação do NDVI em relação à imagem anterior"),
 ]
 
 # Faixas de severidade -> cor do dot (verde alto / amarelo medio / vermelho baixo)
@@ -44,6 +47,14 @@ def _severity_color(key: str, value: Optional[float]) -> str:
     """Retorna cor do dot conforme faixa do indice."""
     if value is None:
         return _COLOR_NONE
+    if key == "delta_ndvi":
+        # Escala bipolar: perda (negativo) vermelho, estavel neutro,
+        # ganho (positivo) verde — espelha buildIndexBadge do client web.
+        if value <= -0.05:
+            return _COLOR_LOW
+        if value < 0.05:
+            return _COLOR_MID
+        return _COLOR_HIGH
     if key in ("ndvi", "evi", "savi"):
         if value >= 0.5:
             return _COLOR_HIGH
@@ -127,10 +138,15 @@ class PixelInspectDialog(QDialog):
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(6)
 
+        self._index_cells = {}  # key -> QFrame (para ocultar celulas opcionais)
         for pos, (key, label, tooltip) in enumerate(_INDEX_DEFS):
             row, col = divmod(pos, 2)
             cell = self._build_cell(key, label, tooltip)
+            self._index_cells[key] = cell
             grid.addWidget(cell, row, col)
+
+        # Δ NDVI so e exibido quando ha imagem de comparacao (2a/2b)
+        self._index_cells["delta_ndvi"].setVisible(False)
 
         self._grid_frame.setLayout(grid)
         root.addWidget(self._grid_frame)
@@ -255,24 +271,30 @@ class PixelInspectDialog(QDialog):
             self._show_and_raise()
             return
 
+        # Selecao inicial prioriza cena que cobre o ponto clicado — cenas de
+        # outros tiles retornam todos os indices nulos (mapeamento multi-tile).
+        initial = next(
+            (i for i, s in enumerate(self._scenes) if s.has_coverage), 0
+        )
+
         # Popula dropdown se houver mais de uma cena
         self._scene_combo.blockSignals(True)
         self._scene_combo.clear()
         for scene in self._scenes:
             self._scene_combo.addItem(scene.display_label())
-        self._scene_combo.setCurrentIndex(0)
+        self._scene_combo.setCurrentIndex(initial)
         self._scene_combo.blockSignals(False)
         self._scene_combo.setVisible(len(self._scenes) > 1)
 
-        self._current_index = 0
-        self._render_scene(self._scenes[0])
+        self._current_index = initial
+        # _render_scene tambem controla o aviso de cena sem cobertura
+        self._render_scene(self._scenes[initial])
         self._status_label.setText(
             f"{len(self._scenes)} cena(s)"
         )
         self._status_label.setStyleSheet(
             "font-size: 10px; color: #2E7D32; border: none; background: transparent;"
         )
-        self._message_label.setVisible(False)
         self._show_and_raise()
 
     def show_error(self, lat: Optional[float], lon: Optional[float], message: str):
@@ -331,12 +353,29 @@ class PixelInspectDialog(QDialog):
                 f"background-color: {color}; border-radius: 4px; border: none;"
             )
 
+        # Δ NDVI so aparece quando o backend calculou a comparacao (2a/2b)
+        self._index_cells["delta_ndvi"].setVisible(scene.delta_ndvi is not None)
+
+        # Aviso de cena fora do footprint: todos os indices nulos significa
+        # que a cena selecionada nao cobre o ponto clicado (mapeamento
+        # multi-tile) — mostra o motivo em vez de so tracos.
+        if not scene.has_coverage:
+            self._message_label.setText(
+                "A cena selecionada não cobre o ponto clicado. "
+                "Selecione outra cena no seletor acima."
+            )
+            self._message_label.setVisible(True)
+        else:
+            self._message_label.setVisible(False)
+
     def _reset_values(self):
         for key, _label, _tip in _INDEX_DEFS:
             self._index_value_labels[key].setText("—")
             self._index_dot_labels[key].setStyleSheet(
                 f"background-color: {_COLOR_NONE}; border-radius: 4px; border: none;"
             )
+        if hasattr(self, "_index_cells"):
+            self._index_cells["delta_ndvi"].setVisible(False)
 
     def _show_and_raise(self):
         if not self.isVisible():

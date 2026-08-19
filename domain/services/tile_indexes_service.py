@@ -30,17 +30,26 @@ class TileIndexesService:
         self._config = config_repo
         self._cache: "OrderedDict[tuple, List[SceneIndexes]]" = OrderedDict()
 
-    def request(self, image_ids: List[str], lat: float, lon: float) -> str:
+    def request(self, image_ids: List[str], lat: float, lon: float,
+                image_ids2: Optional[List[str]] = None) -> str:
         """Dispara POST. Retorna request_id do HttpClient.
 
         Pre-condicao: caller deve ter checado cache via cached_for().
+
+        ``image_ids2`` e uma lista paralela posicional a ``image_ids`` com o
+        id da imagem anterior pareada de cada cena ("" = sem comparacao) —
+        habilita o calculo de delta_ndvi no backend (metodos 2a/2b). O campo
+        so entra no payload quando ha ao menos uma posicao preenchida.
         """
         url = self._build_url()
-        payload = json.dumps({
+        body = {
             "id_imagens": list(image_ids),
             "lat": lat,
             "lon": lon,
-        }).encode("utf-8")
+        }
+        if image_ids2 and any(image_ids2):
+            body["id_imagens2"] = list(image_ids2)
+        payload = json.dumps(body).encode("utf-8")
         return self._http.post_json(url, payload)
 
     def parse_response(self, body: bytes) -> List[SceneIndexes]:
@@ -58,9 +67,11 @@ class TileIndexesService:
     # ------------------------------------------------------------------
 
     def cached_for(self, image_ids: List[str], lat: float,
-                   lon: float) -> Optional[List[SceneIndexes]]:
+                   lon: float,
+                   image_ids2: Optional[List[str]] = None
+                   ) -> Optional[List[SceneIndexes]]:
         """Retorna resultado do cache se houver hit."""
-        key = self._cache_key(image_ids, lat, lon)
+        key = self._cache_key(image_ids, lat, lon, image_ids2)
         if key not in self._cache:
             return None
         # Move para o final (LRU)
@@ -69,9 +80,10 @@ class TileIndexesService:
         return value
 
     def store(self, image_ids: List[str], lat: float, lon: float,
-              scenes: List[SceneIndexes]):
+              scenes: List[SceneIndexes],
+              image_ids2: Optional[List[str]] = None):
         """Insere resultado no cache LRU."""
-        key = self._cache_key(image_ids, lat, lon)
+        key = self._cache_key(image_ids, lat, lon, image_ids2)
         self._cache[key] = scenes
         while len(self._cache) > _CACHE_MAX:
             self._cache.popitem(last=False)
@@ -88,10 +100,17 @@ class TileIndexesService:
         return f"{base}{_ENDPOINT_PATH}"
 
     @staticmethod
-    def _cache_key(image_ids, lat, lon) -> tuple:
-        ids = tuple(sorted(str(i) for i in image_ids))
+    def _cache_key(image_ids, lat, lon, image_ids2=None) -> tuple:
+        # Chave por PARES (id, id2) ordenados: continua insensivel a ordem da
+        # lista, mas distingue pareamentos diferentes (delta_ndvi depende da
+        # imagem2 associada a cada cena).
+        ids2 = list(image_ids2 or [])
+        pairs = tuple(sorted(
+            (str(img), str(ids2[i]) if i < len(ids2) else "")
+            for i, img in enumerate(image_ids)
+        ))
         return (
             round(float(lat), _COORD_PRECISION),
             round(float(lon), _COORD_PRECISION),
-            ids,
+            pairs,
         )

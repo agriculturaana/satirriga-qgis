@@ -23,6 +23,7 @@ from ...ui.tools.pixel_inspect_map_tool import PixelInspectMapTool
 
 _MAX_IMAGE_IDS = 10  # limite defensivo de payload
 _IMAGE_ID_PROP = "satirriga/image_id"
+_IMAGE_ID2_PROP = "satirriga/image_id2"  # imagem anterior pareada (2a/2b)
 
 
 class PixelInspectController(QObject):
@@ -48,6 +49,9 @@ class PixelInspectController(QObject):
         self._pending_id: Optional[str] = None
         self._pending_coords: Optional[tuple] = None  # (lat, lon)
         self._pending_image_ids: List[str] = []
+        # Lista paralela posicional a _pending_image_ids com a imagem
+        # anterior pareada de cada cena ("" = sem comparacao).
+        self._pending_image_ids2: List[str] = []
 
     # ------------------------------------------------------------------
     # Map tool lifecycle
@@ -77,13 +81,15 @@ class PixelInspectController(QObject):
     # ------------------------------------------------------------------
 
     def _on_point_clicked(self, lat: float, lon: float):
-        image_ids = self._resolve_active_image_ids()
-        if not image_ids:
+        pairs = self._resolve_active_image_pairs()
+        if not pairs:
             self.indexes_no_images.emit(lat, lon)
             return
+        image_ids = [p[0] for p in pairs]
+        image_ids2 = [p[1] for p in pairs]
 
         # Cache hit -> entrega imediata
-        cached = self._service.cached_for(image_ids, lat, lon)
+        cached = self._service.cached_for(image_ids, lat, lon, image_ids2)
         if cached is not None:
             self.indexes_ready.emit(lat, lon, cached)
             return
@@ -93,8 +99,11 @@ class PixelInspectController(QObject):
 
         self.indexes_loading.emit(lat, lon)
         self._pending_image_ids = image_ids
+        self._pending_image_ids2 = image_ids2
         self._pending_coords = (lat, lon)
-        self._pending_id = self._service.request(image_ids, lat, lon)
+        self._pending_id = self._service.request(
+            image_ids, lat, lon, image_ids2
+        )
 
         QgsMessageLog.logMessage(
             f"[PixelInspect] POST indices: lat={lat} lon={lon} "
@@ -107,12 +116,14 @@ class PixelInspectController(QObject):
             return
         lat, lon = self._pending_coords or (0.0, 0.0)
         image_ids = self._pending_image_ids
+        image_ids2 = self._pending_image_ids2
         self._pending_id = None
         self._pending_coords = None
         self._pending_image_ids = []
+        self._pending_image_ids2 = []
 
         scenes = self._service.parse_response(body)
-        self._service.store(image_ids, lat, lon, scenes)
+        self._service.store(image_ids, lat, lon, scenes, image_ids2)
         self.indexes_ready.emit(lat, lon, scenes)
 
     def _on_request_error(self, request_id, error_msg):
@@ -121,6 +132,7 @@ class PixelInspectController(QObject):
         self._pending_id = None
         self._pending_coords = None
         self._pending_image_ids = []
+        self._pending_image_ids2 = []
         QgsMessageLog.logMessage(
             f"[PixelInspect] Erro: {error_msg}",
             PLUGIN_NAME, Qgis.Warning,
@@ -136,19 +148,23 @@ class PixelInspectController(QObject):
         self._pending_id = None
         self._pending_coords = None
         self._pending_image_ids = []
+        self._pending_image_ids2 = []
 
     # ------------------------------------------------------------------
     # Resolucao de image_ids ativos
     # ------------------------------------------------------------------
 
-    def _resolve_active_image_ids(self) -> List[str]:
-        """Coleta image_ids dos grupos de data expandidos na arvore.
+    def _resolve_active_image_pairs(self) -> List[tuple]:
+        """Coleta pares (image_id, image_id2) dos grupos de data expandidos.
+
+        ``image_id2`` e a imagem anterior pareada (custom property
+        satirriga/image_id2, metodos 2a/2b) ou "" quando nao ha comparacao.
 
         Estrategia (em ordem de prioridade):
             1. Grupos de data com isExpanded()=True → todas as camadas SatIrriga.
             2. Fallback: primeiro grupo de data encontrado (mais recente).
 
-        Deduplica preservando ordem; limita a _MAX_IMAGE_IDS por payload.
+        Deduplica por image_id preservando ordem; limita a _MAX_IMAGE_IDS.
         """
         root = QgsProject.instance().layerTreeRoot()
 
@@ -159,16 +175,16 @@ class PixelInspectController(QObject):
         expanded = [g for g in date_groups if g.isExpanded()]
         target_groups = expanded or date_groups[:1]
 
-        ids: List[str] = []
+        pairs: List[tuple] = []
         seen = set()
         for group in target_groups:
-            for img_id in self._collect_image_ids(group):
+            for img_id, img_id2 in self._collect_image_pairs(group):
                 if img_id and img_id not in seen:
                     seen.add(img_id)
-                    ids.append(img_id)
-                    if len(ids) >= _MAX_IMAGE_IDS:
-                        return ids
-        return ids
+                    pairs.append((img_id, img_id2))
+                    if len(pairs) >= _MAX_IMAGE_IDS:
+                        return pairs
+        return pairs
 
     def _iter_date_groups(self, node):
         """Itera grupos folha que contenham camadas com custom property image_id.
@@ -198,15 +214,16 @@ class PixelInspectController(QObject):
                             return True
         return False
 
-    def _collect_image_ids(self, group: QgsLayerTreeGroup):
-        """Yield image_ids unicos das camadas SatIrriga sob `group`."""
+    def _collect_image_pairs(self, group: QgsLayerTreeGroup):
+        """Yield (image_id, image_id2) das camadas SatIrriga sob `group`."""
         for child in self._iter_layer_nodes(group):
             layer = child.layer()
             if not layer:
                 continue
             img_id = layer.customProperty(_IMAGE_ID_PROP)
             if img_id and "-" not in img_id:  # ignora image_ids compostos (diff)
-                yield img_id
+                img_id2 = layer.customProperty(_IMAGE_ID2_PROP) or ""
+                yield img_id, img_id2
 
     def _iter_layer_nodes(self, node):
         if isinstance(node, QgsLayerTreeLayer):

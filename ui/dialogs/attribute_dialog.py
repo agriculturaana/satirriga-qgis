@@ -35,6 +35,21 @@ from ...domain.services.attribute_schema import (
 from ..widgets.collapsible_section import CollapsibleSection
 
 
+def _format_iso_date(value) -> str:
+    """Formata data ISO (ex.: '2025-11-05T12:53:02.000Z') como DD/MM/YYYY.
+
+    Retorna string vazia para valores nulos/invalidos — o caller usa a
+    string vazia para omitir a linha do formulario.
+    """
+    if not value:
+        return ""
+    text = str(value)
+    try:
+        return datetime.strptime(text[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+    except ValueError:
+        return text
+
+
 # Cores de badge por sync status (espelhado de camadas_tab._SYNC_COLORS)
 _SYNC_COLORS = {
     "DOWNLOADED": "#2196F3",
@@ -282,6 +297,28 @@ class AttributeEditDialog(QDialog):
 
         layout = QVBoxLayout()
 
+        # --- Imagens da classificacao ---
+        # Datas efetivas das imagens usadas na classificacao (diferentes da
+        # data de referencia do mapeamento). Nos metodos de deteccao de
+        # mudanca (2a/2b) ha tambem a segunda imagem da comparacao.
+        img_form = QFormLayout()
+        img_form.setLabelAlignment(Qt.AlignRight)
+        img_fields = [
+            ("Tile", entry.get("tile")),
+            ("Imagem", entry.get("id_img")),
+            ("Data da Imagem", _format_iso_date(entry.get("scan_date"))),
+            ("Imagem 2 (comparacao)", entry.get("id_img_2")),
+            ("Data da Imagem 2", _format_iso_date(entry.get("scan_date_2"))),
+        ]
+        for label, value in img_fields:
+            if value:
+                lbl = QLabel(str(value))
+                lbl.setStyleSheet("font-size: 12px; color: #424242; padding: 2px 8px;")
+                img_form.addRow(f"{label}:", lbl)
+
+        if img_form.rowCount() > 0:
+            layout.addLayout(img_form)
+
         # --- Localizacao ---
         loc_form = QFormLayout()
         loc_form.setLabelAlignment(Qt.AlignRight)
@@ -342,7 +379,8 @@ class AttributeEditDialog(QDialog):
             table.setFixedHeight(min(row_h * len(empre) + 30, 200))
             layout.addWidget(table)
 
-        if loc_form.rowCount() > 0 or (isinstance(empre, list) and len(empre) > 0):
+        if (img_form.rowCount() > 0 or loc_form.rowCount() > 0
+                or (isinstance(empre, list) and len(empre) > 0)):
             section = CollapsibleSection(
                 title="Overlay",
                 icon="",

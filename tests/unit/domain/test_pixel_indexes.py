@@ -53,12 +53,38 @@ class TestSceneIndexesFromDict:
     def test_display_label_uses_date_and_tile(self):
         scene = SceneIndexes.from_dict({
             "id_imagem": "X", "tile": "24MXT", "data_formatada": "22/10/2025",
+            "ndvi": 0.5,
         })
         assert scene.display_label() == "22/10/2025 - 24MXT"
 
     def test_display_label_falls_back_to_id(self):
-        scene = SceneIndexes.from_dict({"id_imagem": "X"})
+        scene = SceneIndexes.from_dict({"id_imagem": "X", "ndvi": 0.5})
         assert scene.display_label() == "X"
+
+    def test_display_label_marca_cena_sem_cobertura(self):
+        """Todos os indices nulos = cena fora do footprint do ponto clicado."""
+        scene = SceneIndexes.from_dict({
+            "id_imagem": "X", "tile": "24MXT", "data_formatada": "22/10/2025",
+        })
+        assert scene.display_label() == (
+            "22/10/2025 - 24MXT — sem cobertura no ponto"
+        )
+
+    def test_parses_delta_ndvi(self):
+        scene = SceneIndexes.from_dict({"id_imagem": "X", "delta_ndvi": -0.12})
+        assert scene.delta_ndvi == -0.12
+
+    def test_delta_ndvi_ausente_e_none(self):
+        scene = SceneIndexes.from_dict({"id_imagem": "X", "ndvi": 0.4})
+        assert scene.delta_ndvi is None
+
+    def test_has_coverage_true_com_um_indice(self):
+        scene = SceneIndexes.from_dict({"id_imagem": "X", "albedo": 0.2})
+        assert scene.has_coverage is True
+
+    def test_has_coverage_false_todos_nulos(self):
+        scene = SceneIndexes.from_dict({"id_imagem": "X"})
+        assert scene.has_coverage is False
 
 
 class TestParseSceneList:

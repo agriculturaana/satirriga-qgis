@@ -220,10 +220,14 @@ def build_raster_hierarchy(tile_data, metodo_apply: str,
         for tile_item in tiles:
             image_id = tile_item.get("id_imagem") or ""
             tile_name = tile_item.get("tile") or _extract_tile_name(image_id)
+            # Imagem anterior pareada (metodos 2a/2b) — vem em `imagem2`
+            # quando a API e consultada com byMetodos=true.
+            image_id_2 = (tile_item.get("imagem2") or {}).get("id_imagem") or ""
 
             if image_id:
                 # Acesso direto: gera URL com params de visualizacao
-                _build_direct_layers(bands_map, image_id, tile_name, sidecar)
+                _build_direct_layers(bands_map, image_id, tile_name, sidecar,
+                                     image_id_2)
             else:
                 # Legado: usa URLs pre-construidas da API
                 _build_legacy_layers(bands_map, tile_item, tile_name, image_id,
@@ -257,7 +261,7 @@ def build_raster_hierarchy(tile_data, metodo_apply: str,
 
 
 def _build_direct_layers(bands_map: dict, image_id: str, tile_name: str,
-                         sidecar: dict = None):
+                         sidecar: dict = None, image_id_2: str = ""):
     """Gera layers para TODAS as bandas via URL direta (tiles com image_id).
 
     Usa configuracao de visualizacao (sidecar > global > hardcoded) para
@@ -288,6 +292,7 @@ def _build_direct_layers(bands_map: dict, image_id: str, tile_name: str,
                 layer_type=layer_type,
                 tile=tile_name,
                 image_id=image_id,
+                image_id_2=image_id_2,
                 vis_params=vis_params,
                 is_visible=default_visible,
             )

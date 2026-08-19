@@ -124,6 +124,25 @@ class TestBuildHierarchyDirect:
         assert layer.vis_params.max_val == 3000
         assert layer.vis_params.gamma == 1.2
 
+    def test_image_id_2_propagado_da_imagem2(self):
+        """Tiles com `imagem2` (metodos 2a/2b) carregam o par em todas as bandas."""
+        tile = _make_tile(image_id="IMG_A")
+        tile["imagem2"] = {"id_imagem": "IMG_A_ANTERIOR", "data": "2025-10-02",
+                          "tile": "T24MXT"}
+        h = build_raster_hierarchy([tile], "RANDOM_FOREST")
+
+        for band in h.dates[0].bands:
+            for layer in band.layers:
+                assert layer.image_id_2 == "IMG_A_ANTERIOR"
+
+    def test_image_id_2_vazio_sem_imagem2(self):
+        tile_data = [_make_tile(image_id="IMG_A")]
+        h = build_raster_hierarchy(tile_data, "RANDOM_FOREST")
+
+        for band in h.dates[0].bands:
+            for layer in band.layers:
+                assert layer.image_id_2 == ""
+
     def test_layer_visibility_defaults(self):
         tile_data = [_make_tile()]
         h = build_raster_hierarchy(tile_data, "RANDOM_FOREST")

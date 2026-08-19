@@ -1404,6 +1404,12 @@ class SatIrrigaPlugin:
                             _json.dumps(asdict(config.vis_params)),
                         )
                         layer.setCustomProperty("satirriga/band_key", band_group.band_key)
+                        # Imagem anterior pareada (metodos 2a/2b) — usada pela
+                        # inspecao de pixel para calcular delta_ndvi no backend.
+                        if config.image_id_2:
+                            layer.setCustomProperty(
+                                "satirriga/image_id2", config.image_id_2
+                            )
 
                     QgsProject.instance().addMapLayer(layer, False)
                     band_node.addLayer(layer)
