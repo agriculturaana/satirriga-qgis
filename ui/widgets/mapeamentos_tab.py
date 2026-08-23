@@ -432,6 +432,15 @@ class MapeamentosTab(QWidget):
         if item.status not in _downloadable:
             btn.setEnabled(False)
             btn.setToolTip(f"Download indisponível (status: {status_text})")
+        elif is_polling:
+            # Reprocessamento pós-upload em andamento: o resultado ainda
+            # está sendo recalculado (overlay + zonal stats) — o servidor
+            # responderia 409 REPROCESSING.
+            btn.setEnabled(False)
+            btn.setToolTip(
+                "Download indisponível: reprocessamento de overlay e "
+                "estatísticas zonais em andamento"
+            )
 
         row1.addWidget(btn)
 

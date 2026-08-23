@@ -221,6 +221,21 @@ class DownloadZonalTask(SatIrrigaTask):
                     "(re-download)"
                 )
 
+            if dl_resp.status_code == 409:
+                # Servidor bloqueia download durante reprocessamento
+                # pós-upload (code=REPROCESSING) para evitar dados
+                # parcialmente recalculados.
+                try:
+                    err_body = dl_resp.json()
+                    err_msg = err_body.get("message", "")
+                except Exception:
+                    err_msg = ""
+                self._exception = Exception(
+                    err_msg
+                    or "Zonal em reprocessamento. Aguarde a conclusão "
+                    "para baixar o resultado atualizado."
+                )
+                return False
             dl_resp.raise_for_status()
 
             header_feature_count = dl_resp.headers.get("X-Feature-Count")
