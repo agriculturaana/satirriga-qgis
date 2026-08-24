@@ -344,6 +344,13 @@ class MapeamentosTab(QWidget):
 
         is_polling = self._controller.is_polling(item.id)
 
+        # Card que chega do catálogo já em status intermediário (ex.:
+        # reprocessamento iniciado em outra sessão): inscreve no polling para
+        # o card se atualizar sozinho quando o servidor concluir.
+        if item.status in _intermediate and not is_polling:
+            self._controller.start_polling_zonal(item.id)
+            is_polling = True
+
         if item.status in _reprocessable and not is_polling:
             # Botão Reprocessar
             btn_reprocess = QPushButton(
@@ -591,6 +598,13 @@ class MapeamentosTab(QWidget):
     def _request_page(self):
         """Dispara requisição ao servidor com filtros, ordenação e página corrente."""
         status = self._filter_status.currentData() or "CONSOLIDATED"
+        # Na visão de consolidados, inclui os status intermediários do
+        # reprocessamento pós-upload: sem isso o card some da lista enquanto
+        # o servidor recalcula (status PROCESSING), o que já levou usuários a
+        # reenviar o mesmo mapeamento. Com o card visível, o badge mostra
+        # "Processando" e os botões Encerrar/Baixar ficam indisponíveis.
+        if status == ZonalStatusEnum.CONSOLIDATED.value:
+            status = "CONSOLIDATED,PROCESSING,OVERLAID,CONSOLIDATING"
         metodo = self._filter_metodo.currentData() or ""
         mapeamento_id = self._filter_id.text().strip()
         author = self._filter_author.text().strip()

@@ -283,7 +283,10 @@ class CamadasTab(QWidget):
         btn_upload = QPushButton(tinted_icon(os.path.join(_ICONS_DIR, "action_upload.svg"), "#FFFFFF"), "Enviar")
         btn_upload.setIconSize(QSize(14, 14))
         btn_upload.setFixedWidth(65)
-        if has_changes:
+        # Zonal em reprocessamento (overlay + zonal stats): bloquear novo
+        # envio para evitar uploads duplicados durante o recálculo.
+        is_reprocessing = bool(zonal_id) and self._controller.is_polling(zonal_id)
+        if has_changes and not is_reprocessing:
             btn_upload.setEnabled(True)
             btn_upload.setStyleSheet(
                 "QPushButton { background-color: #FF9800; color: white;"
@@ -300,7 +303,11 @@ class CamadasTab(QWidget):
                 "QPushButton { background-color: #E0E0E0; color: #9E9E9E;"
                 " border: none; padding: 3px 8px; border-radius: 3px; font-size: 11px; }"
             )
-            btn_upload.setToolTip("Sem alterações para enviar")
+            btn_upload.setToolTip(
+                "Reprocessamento em andamento — aguarde a conclusão para enviar"
+                if is_reprocessing
+                else "Sem alterações para enviar"
+            )
         row3.addWidget(btn_upload)
 
         # Remover
@@ -348,8 +355,15 @@ class CamadasTab(QWidget):
 
         card.setLayout(layout)
         card._action_buttons = [btn_open, btn_upload]
+        card._btn_upload = btn_upload
+        card._upload_has_changes = has_changes
         card._btn_encerrar = btn_encerrar
         card._zonal_id = zonal_id
+        if btn_encerrar is not None and is_reprocessing:
+            btn_encerrar.setEnabled(False)
+            btn_encerrar.setToolTip(
+                "Reprocessamento em andamento — aguarde a conclusão"
+            )
         return card
 
     @staticmethod
@@ -456,10 +470,45 @@ class CamadasTab(QWidget):
             self._controller.stop_polling_zonal(zonal_id)
 
     def _apply_queue_badge_all(self, zonal_id, status):
-        """Aplica badge em todos os cards que referenciam o zonal (Mapeamentos/Homologação)."""
+        """Aplica badge em todos os cards que referenciam o zonal (Mapeamentos/Homologação).
+
+        Também sincroniza os botões de ação: durante status intermediários do
+        reprocessamento, Enviar e Encerrar ficam desabilitados; ao atingir um
+        status terminal, voltam ao estado ditado pelo sync local.
+        """
+        reprocessing = status in self._intermediate_statuses
         for (zid, _origin), card in self._cards_by_zonal.items():
-            if zid == zonal_id and hasattr(card, "_queue_badge"):
+            if zid != zonal_id:
+                continue
+            if hasattr(card, "_queue_badge"):
                 self._apply_queue_badge(card, status)
+            try:
+                btn_upload = getattr(card, "_btn_upload", None)
+                if btn_upload is not None:
+                    if reprocessing:
+                        btn_upload.setEnabled(False)
+                        btn_upload.setToolTip(
+                            "Reprocessamento em andamento — aguarde a "
+                            "conclusão para enviar"
+                        )
+                    elif getattr(card, "_upload_has_changes", False):
+                        btn_upload.setEnabled(True)
+                        btn_upload.setToolTip("Alterações locais pendentes de envio")
+                btn_encerrar = getattr(card, "_btn_encerrar", None)
+                if btn_encerrar is not None:
+                    if reprocessing:
+                        btn_encerrar.setEnabled(False)
+                        btn_encerrar.setToolTip(
+                            "Reprocessamento em andamento — aguarde a conclusão"
+                        )
+                    else:
+                        btn_encerrar.setEnabled(True)
+                        btn_encerrar.setToolTip(
+                            "Encerrar mapeamento para homologação"
+                        )
+            except RuntimeError:
+                # Widget C++ já destruído — será recriado no próximo refresh
+                continue
 
     @staticmethod
     def _apply_queue_badge(card, status):
