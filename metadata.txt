@@ -2,7 +2,7 @@
 name=SatIrriga QGIS
 qgisMinimumVersion=3.22
 description=QGIS client for the SatIrriga platform (ANA/INPE). Browse, download, edit, and submit satellite-based irrigation maps.
-version=3.1.0
+version=3.1.1
 author=Tharles de Sousa Andrade | ANA | INPE
 email=irtharles@gmail.com
 
