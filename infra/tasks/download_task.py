@@ -190,6 +190,7 @@ class DownloadZonalTask(SatIrrigaTask):
                         "Dados em cache, atualizando checkout..."
                     )
                     sidecar_data = existing_sidecar.copy()
+                    sidecar_data.pop("needsRedownload", None)
                     sidecar_data.update({
                         "editToken": edit_token,
                         "zonalVersion": zonal_version,

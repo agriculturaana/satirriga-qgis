@@ -16,6 +16,7 @@ _ICONS_DIR = os.path.join(
 from ..icon_utils import tinted_icon
 
 from ...domain.models.enums import UploadBatchStatusEnum, ZonalStatusEnum
+from ...domain.services.upload_feedback import reprocessing_outcome, summarize_batch
 
 
 class UploadProgressWidget(QWidget):
@@ -104,19 +105,43 @@ class UploadProgressWidget(QWidget):
             self._status_label.setStyleSheet("font-size: 11px; color: #2196F3;")
             try:
                 status_enum = ZonalStatusEnum(zonal_status)
-                self._detail_label.setText(f"Status: {status_enum.label}")
+                detail = f"Status: {status_enum.label}"
             except ValueError:
-                self._detail_label.setText(f"Status: {zonal_status}")
+                detail = f"Status: {zonal_status}"
+            ciclos = status_data.get("overlayRetryCount") or 0
+            pendentes = status_data.get("pendingGeoids") or 0
+            if ciclos:
+                detail += f" · ciclo adicional de overlay {ciclos}"
+            if pendentes:
+                detail += f" · {pendentes} feição(ões) aguardando identificador"
+            self._detail_label.setText(detail)
             return
 
         if phase == "reprocessing_done":
+            outcome = reprocessing_outcome(
+                status_data.get("zonalStatus"),
+                status_data.get("lastError"),
+                status_data.get("pendingGeoids") or 0,
+            )
             self._progress_bar.setRange(0, 100)
             self._progress_bar.setValue(100)
             self._cancel_btn.setEnabled(False)
-            self._status_label.setText("Concluído")
-            self._status_label.setStyleSheet("font-size: 11px; color: #4CAF50;")
+            self._status_label.setText(outcome.label)
+            self._status_label.setStyleSheet(f"font-size: 11px; color: {outcome.color};")
+            self._detail_label.setText(outcome.message)
+            self._detail_label.setToolTip(outcome.message)
+            return
+
+        if phase == "reprocessing_timeout":
+            self._progress_bar.setRange(0, 100)
+            self._progress_bar.setValue(100)
+            self._cancel_btn.setEnabled(False)
+            self._status_label.setText("Recálculo em andamento no servidor")
+            self._status_label.setStyleSheet("font-size: 11px; color: #2196F3;")
             self._detail_label.setText(
-                "Upload e reprocessamento finalizados"
+                "O envio foi concluído. O recálculo de overlay e estatísticas "
+                "continua no servidor e o mapeamento ficará disponível ao terminar; "
+                "acompanhe o status na aba Mapeamentos."
             )
             return
 
@@ -146,23 +171,15 @@ class UploadProgressWidget(QWidget):
         except ValueError:
             self._status_label.setText(status)
 
-        # Detalhes
-        parts = []
-        feature_count = status_data.get("featureCount", 0)
-        valid_count = status_data.get("validCount", 0)
-        modified_count = status_data.get("modifiedCount", 0)
-        new_count = status_data.get("newCount", 0)
-
-        if feature_count:
-            parts.append(f"Features: {feature_count}")
-        if valid_count:
-            parts.append(f"Válidas: {valid_count}")
-        if modified_count:
-            parts.append(f"Modificadas: {modified_count}")
-        if new_count:
-            parts.append(f"Novas: {new_count}")
-
-        self._detail_label.setText(" | ".join(parts) if parts else "")
+        # Detalhes, incluindo as feições rejeitadas pelo servidor (a versão
+        # anterior é mantida quando a feição já existia)
+        summary = summarize_batch(status_data)
+        detail = summary.detail_text()
+        rejection = summary.rejection_text()
+        if rejection:
+            detail = f"{detail}\n{rejection}" if detail else rejection
+        self._detail_label.setText(detail)
+        self._detail_label.setToolTip(rejection)
 
     def start_upload(self, zonal_id, batch_uuid=None):
         """Inicializa widget para novo upload."""

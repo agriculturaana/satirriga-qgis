@@ -20,6 +20,7 @@ from qgis.core import (
 from qgis.utils import iface as qgis_iface
 
 from ...domain.models.enums import UploadBatchStatusEnum
+from ...domain.services.upload_feedback import parse_rejections
 from ...infra.config.settings import PLUGIN_NAME
 from ..theme import SectionHeader
 
@@ -245,7 +246,19 @@ class UploadHistoryWidget(QWidget):
             metrics.setStyleSheet("font-size: 11px;")
             layout.addWidget(metrics)
 
-        # --- Linha 4: erro ---
+        # --- Linha 4: feições rejeitadas em upload concluído ---
+        rejeitadas = parse_rejections(item.error_log) if item.status == "COMPLETED" else []
+        if rejeitadas:
+            rej_label = QLabel(
+                f"{len(rejeitadas)} feição(ões) rejeitada(s) pelo servidor "
+                "(passe o mouse para ver os motivos)"
+            )
+            rej_label.setStyleSheet("font-size: 10px; color: #E65100;")
+            rej_label.setWordWrap(True)
+            rej_label.setToolTip("\n".join(r.describe() for r in rejeitadas))
+            layout.addWidget(rej_label)
+
+        # --- Linha 5: erro ---
         if item.error_log and item.status == "FAILED":
             error_text = str(item.error_log)
             if len(error_text) > 120:

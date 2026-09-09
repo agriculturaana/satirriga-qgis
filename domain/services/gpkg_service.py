@@ -217,6 +217,7 @@ def list_local_gpkgs(base_dir: str) -> list:
             "type": gpkg_type,
             "origin": origin_key,
             "has_sidecar": has_sidecar,
+            "needs_redownload": bool(sc_data.get("needsRedownload")),
             "size_mb": round(gpkg_file.stat().st_size / (1024 * 1024), 2),
         }
 

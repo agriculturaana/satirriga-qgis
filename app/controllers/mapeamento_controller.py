@@ -20,6 +20,7 @@ class MapeamentoController(QObject):
     mapeamento_homologado_download_completed = pyqtSignal(str, int, object)
     # gpkg_path, mapeamento_id, meta — download consolidado read-only
     zonal_upload_completed = pyqtSignal(str, int)    # gpkg_path, zonal_id
+    zonal_reprocessing_finished = pyqtSignal(int, str, str)  # zonal_id, status final, lastError
     versions_loaded = pyqtSignal(int, dict)          # zonal_id, versions_data
     compare_fgb_ready = pyqtSignal(int, str, bytes)  # zonal_id, batch_uuid, fgb_bytes
     upload_progress = pyqtSignal(dict)               # UploadBatchStatus dict
@@ -1132,7 +1133,7 @@ class MapeamentoController(QObject):
             lambda msg: QgsMessageLog.logMessage(msg, PLUGIN_NAME, Qgis.Info)
         )
         task.signals.upload_progress.connect(
-            lambda data: self.upload_progress.emit(data)
+            lambda data: self._on_upload_task_progress(data, zonal_id)
         )
         task.signals.conflict_detected.connect(
             lambda batch_uuid: self.conflict_detected.emit(batch_uuid)
@@ -1141,6 +1142,33 @@ class MapeamentoController(QObject):
         self._active_tasks.append(task)
         self._state.set_loading("upload", True)
         QgsApplication.taskManager().addTask(task)
+
+    def _on_upload_task_progress(self, data, zonal_id):
+        """Repassa o progresso do upload e traduz o fim do reprocessamento."""
+        self.upload_progress.emit(data)
+        phase = data.get("phase")
+        if phase == "reprocessing_done":
+            self.zonal_reprocessing_finished.emit(
+                int(zonal_id),
+                str(data.get("zonalStatus") or ""),
+                str(data.get("lastError") or ""),
+            )
+        elif phase == "reprocessing_timeout":
+            self.start_polling_zonal(zonal_id)
+
+    def count_duplicate_original_fids(self, gpkg_path):
+        """Conta identificadores de origem repetidos no GeoPackage local."""
+        from ...domain.services.upload_feedback import find_duplicate_original_fids
+
+        layer = QgsVectorLayer(gpkg_path, "dup_check", "ogr")
+        if not layer.isValid():
+            return {}
+        idx = layer.fields().indexOf("_original_fid")
+        if idx < 0:
+            return {}
+        return find_duplicate_original_fids(
+            feat.attribute(idx) for feat in layer.getFeatures()
+        )
 
     def _on_zonal_upload_completed(self, success, message, gpkg_path, zonal_id):
         self._cleanup_finished_tasks()
@@ -1203,6 +1231,15 @@ class MapeamentoController(QObject):
             provider.deleteFeatures(deleted_fids)
         if attr_changes or deleted_fids:
             provider.forceReload()
+
+        # Identificadores e índices das feições enviadas mudam no servidor
+        # durante o recálculo; a cópia local só volta a refletir o servidor
+        # com novo download.
+        from ...domain.services.gpkg_service import read_sidecar, write_sidecar
+        sidecar = read_sidecar(gpkg_path)
+        sidecar["needsRedownload"] = True
+        sidecar["uploadedAt"] = now_iso
+        write_sidecar(gpkg_path, sidecar)
 
     # ----------------------------------------------------------------
     # Edit tracking

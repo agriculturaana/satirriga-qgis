@@ -541,6 +541,9 @@ class MapeamentosTab(QWidget):
                 if sidecar.get("editToken"):
                     sinc_status = "Em edição"
                     sinc_color = "#1565C0"
+                if sidecar.get("needsRedownload"):
+                    sinc_status = "Desatualizado (baixar novamente)"
+                    sinc_color = "#E65100"
                 size_bytes = os.path.getsize(gpkg)
                 if size_bytes > 1024 * 1024:
                     size_str = f"{size_bytes / (1024 * 1024):.1f} MB"

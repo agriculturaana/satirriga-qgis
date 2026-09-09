@@ -129,6 +129,7 @@ class CamadasTab(QWidget):
         self._state.error_occurred.connect(self._on_error)
 
         self._controller.zonal_upload_completed.connect(self._on_zonal_upload_done)
+        self._controller.zonal_reprocessing_finished.connect(self._on_zonal_reprocessing_finished)
         self._controller.edit_tracking_done.connect(self._refresh_list)
         self._state.zonal_status_polled.connect(self._on_zonal_status_polled)
 
@@ -190,6 +191,22 @@ class CamadasTab(QWidget):
         )
         badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         row1.addWidget(badge)
+
+        # Após um upload, identificadores e índices das feições novas ou
+        # editadas mudam no servidor; a cópia local só volta a refletir o
+        # servidor com novo download.
+        if gpkg_info.get("needs_redownload"):
+            stale_badge = QLabel("Desatualizado")
+            stale_badge.setToolTip(
+                "Cópia local anterior ao último envio. Baixe novamente para "
+                "obter identificadores e índices atualizados."
+            )
+            stale_badge.setStyleSheet(
+                "background-color: #E65100; color: white;"
+                " border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: bold;"
+            )
+            stale_badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+            row1.addWidget(stale_badge)
 
         # Queue status badge (overlay/zonal) — visível somente durante polling
         queue_badge = QLabel()
@@ -421,6 +438,14 @@ class CamadasTab(QWidget):
         if phase == "reprocessing":
             self._set_encerrar_buttons_enabled(False, "Aguardando reprocessamento...")
         elif phase == "reprocessing_done":
+            self._refresh_list()
+        elif phase == "reprocessing_timeout":
+            # O servidor continua o recálculo; o polling geral mantém o card
+            # atualizado até o zonal sair dos estados intermediários.
+            zonal_id = status_data.get("zonalId")
+            if zonal_id:
+                self._apply_queue_badge_all(zonal_id, "PROCESSING")
+                self._controller.start_polling_zonal(zonal_id)
             self._refresh_list()
 
         from ...domain.models.enums import UploadBatchStatusEnum
@@ -733,7 +758,54 @@ class CamadasTab(QWidget):
         if not self._state.is_authenticated:
             self._state.set_error("upload", "Nao autenticado")
             return
+        duplicadas = self._controller.count_duplicate_original_fids(gpkg_path)
+        if duplicadas:
+            total = sum(duplicadas.values()) - len(duplicadas)
+            reply = QMessageBox.question(
+                self,
+                "Feições duplicadas",
+                f"{total} feição(ões) repetem o identificador de origem de outra "
+                f"feição ({len(duplicadas)} identificador(es) afetado(s)).\n"
+                "Cópias idênticas serão descartadas pelo servidor; cópias com "
+                "geometria diferente serão tratadas como feições novas.\n"
+                "Deseja enviar mesmo assim?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
         self._controller.upload_zonal_edits(gpkg_path)
+
+    def _on_zonal_reprocessing_finished(self, zonal_id, status, last_error):
+        """Informa o desfecho do recálculo pós-upload e oferece novo download."""
+        from ...domain.services.upload_feedback import reprocessing_outcome
+        from ...domain.models.enums import DownloadOrigin
+
+        outcome = reprocessing_outcome(status, last_error or None)
+        self._refresh_list()
+        if not outcome.ok:
+            QMessageBox.warning(
+                self,
+                "Recálculo com falha",
+                f"O envio do zonal {zonal_id} foi concluído, mas o recálculo "
+                f"terminou em '{outcome.label}'.\n\n{outcome.message}",
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Recálculo concluído",
+            f"Overlay e estatísticas do zonal {zonal_id} foram recalculados.\n"
+            "Identificadores e índices das feições novas ou editadas mudaram no "
+            "servidor, e a cópia local está desatualizada.\n"
+            "Deseja baixar novamente agora?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply == QMessageBox.Yes:
+            self._controller.download_zonal_result(
+                zonal_id, origin=DownloadOrigin.MAPEAMENTOS.value,
+            )
 
     def _remove_gpkg(self, gpkg_path, modified_count):
         """Remove GPKG local com confirmação se há edições pendentes."""

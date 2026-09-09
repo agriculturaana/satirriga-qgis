@@ -18,6 +18,7 @@ from qgis.core import Qgis
 
 from .base_task import SatIrrigaTask
 from ...domain.models.enums import UploadBatchStatusEnum
+from ...domain.services.upload_feedback import is_terminal_zonal_status
 
 
 class UploadZonalTask(SatIrrigaTask):
@@ -339,14 +340,27 @@ class UploadZonalTask(SatIrrigaTask):
                 self._log(f"Upload zonal {self._zonal_id} concluido: batch {self._batch_uuid}")
 
                 # Fase 2: monitorar reprocessamento (overlay + zonal stats)
+                final_status = None
                 if self._zonal_status_url:
-                    self._poll_reprocessing(headers)
+                    final_status = self._poll_reprocessing(headers)
 
                 self.setProgress(100)
+                if self._zonal_status_url and final_status is None:
+                    self.signals.status_message.emit("Recálculo em andamento no servidor")
+                    self.signals.upload_progress.emit({
+                        "phase": "reprocessing_timeout",
+                        "zonalId": self._zonal_id,
+                    })
+                    return True
+
+                final_status = final_status or {}
                 self.signals.status_message.emit("Concluído")
                 self.signals.upload_progress.emit({
                     "phase": "reprocessing_done",
-                    "status": "COMPLETED",
+                    "zonalId": self._zonal_id,
+                    "zonalStatus": final_status.get("status"),
+                    "lastError": final_status.get("lastError"),
+                    "pendingGeoids": final_status.get("pendingGeoids", 0),
                 })
                 return True
             elif batch_status == UploadBatchStatusEnum.FAILED.value:
@@ -376,25 +390,30 @@ class UploadZonalTask(SatIrrigaTask):
     def _poll_reprocessing(self, headers):
         """Monitora reprocessamento pos-upload (overlay + zonal stats).
 
-        Faz polling de GET /api/zonal/:id/status ate zonal.status
-        sair de PROCESSING. Timeout de 10 minutos.
+        Faz polling de GET /api/zonal/:id/status ate zonal.status sair dos
+        estados intermediarios e devolve o ultimo status recebido (com
+        ``lastError`` e ``pendingGeoids``). Devolve None se o limite de 30
+        minutos expirar; o servidor continua o recalculo, que pode envolver
+        varios ciclos de overlay quando ha muitas feicoes novas ou editadas
+        na mesma regiao.
         """
         self.signals.status_message.emit(
             "Recalculando overlay e estatísticas zonais..."
         )
         self.signals.upload_progress.emit({
             "phase": "reprocessing",
+            "zonalId": self._zonal_id,
             "zonalStatus": "PROCESSING",
         })
         self.setProgress(96)
 
-        max_polls = 200  # 200 * 3s = 10 min
+        max_polls = 600  # 600 * 3s = 30 min
         poll_count = 0
         last_zonal_status = ""
 
         while poll_count < max_polls:
             if self.isCanceled():
-                return
+                return None
 
             time.sleep(3)
             poll_count += 1
@@ -415,30 +434,34 @@ class UploadZonalTask(SatIrrigaTask):
                 if zonal_status != last_zonal_status:
                     self._log(
                         f"[Reprocessamento] zonal.status={zonal_status} "
-                        f"version={data.get('version')}"
+                        f"version={data.get('version')} "
+                        f"ciclos={data.get('overlayRetryCount', 0)} "
+                        f"pendentes={data.get('pendingGeoids', 0)}"
                     )
                     last_zonal_status = zonal_status
 
                 self.signals.upload_progress.emit({
                     "phase": "reprocessing",
+                    "zonalId": self._zonal_id,
                     "zonalStatus": zonal_status,
+                    "overlayRetryCount": data.get("overlayRetryCount", 0),
+                    "pendingGeoids": data.get("pendingGeoids", 0),
                 })
 
-                # Saida: zonal saiu de estados intermediarios
-                if zonal_status not in (
-                    "PROCESSING", "OVERLAID", "CREATED", "CONSOLIDATING",
-                ):
+                if is_terminal_zonal_status(zonal_status):
                     self._log(
                         f"[Reprocessamento] Concluido: "
-                        f"zonal.status={zonal_status}"
+                        f"zonal.status={zonal_status} "
+                        f"lastError={data.get('lastError')}"
                     )
                     self.setProgress(99)
-                    return
+                    return data
 
-            except requests.RequestException:
+            except (requests.RequestException, ValueError):
                 continue
 
         self._log(
-            "[Reprocessamento] Timeout 10min — upload ja esta COMPLETED, "
+            "[Reprocessamento] Timeout 30min — upload ja esta COMPLETED, "
             "reprocessamento continua no servidor"
         )
+        return None
