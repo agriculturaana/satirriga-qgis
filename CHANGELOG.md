@@ -5,6 +5,19 @@ Todas as mudancas notaveis do SatIrriga QGIS Plugin serao documentadas neste arq
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
 e o versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
+## [3.1.2] - 2026-09-09
+
+### Adicionado
+
+- **Retorno das feições rejeitadas pelo servidor:** o painel de progresso e o histórico de uploads exibem as feições rejeitadas (área menor que 900 m², cópia idêntica, referência a versão superada, geometria inválida) e informam quando a versão anterior foi mantida
+- **Desfecho do recálculo pós-upload:** ao terminar o reprocessamento o plugin mostra o status final do zonal com o motivo da falha, quando houver, em vez de "Concluído" incondicional; ciclos adicionais de overlay e feições aguardando identificador aparecem durante a espera
+- **Cópia local desatualizada:** após o envio, o GeoPackage local é marcado como desatualizado no card e na aba Mapeamentos, com oferta de novo download ao fim do recálculo
+- **Aviso de feições duplicadas:** antes do envio, identificadores de origem repetidos no GeoPackage geram confirmação
+
+### Corrigido
+
+- Monitoramento pós-upload passa a esperar até 30 minutos e, ao expirar, entrega o acompanhamento ao polling da lista em vez de encerrar como concluído
+
 ## [3.1.0] - 2026-05-12
 
 ### Adicionado
