@@ -619,12 +619,13 @@ def test_retomada_recusada_informa_o_motivo_e_volta_a_acompanhar():
 
 
 @pytest.mark.parametrize("resumable", [True, False])
-def test_card_em_processamento_so_oferece_reprocessar_quando_retomavel(resumable):
+def test_card_em_processamento_so_oferece_reprocessar_quando_retomavel(resumable, tmp_path):
     from qgis.PyQt.QtWidgets import QPushButton
 
     state = MagicMock()
     state.is_authenticated = False
     controller = MagicMock()
+    controller.get_gpkg_base_dir.return_value = str(tmp_path)
     controller.is_polling.return_value = False
     controller.is_resumable.return_value = resumable
     tab = tab_module.MapeamentosTab(state, controller)
