@@ -44,6 +44,14 @@ class TestParseRejections:
         ]})
         assert rejeitadas[0].reasons == ["ALGO_NOVO"]
 
+    def test_parte_recusada_pela_rejeicao_de_outra_parte_explica_e_mantem_versao(self):
+        rejeitada = parse_rejections({"rejeitadas": [
+            {"originalFid": 7, "syncStatus": "NEW", "errors": [{"type": "ORIGIN_REJECTED", "detail": 7}]}
+        ]})[0]
+        assert rejeitada.reasons != ["ORIGIN_REJECTED"]
+        assert rejeitada.kept_previous is True
+        assert "versão anterior mantida" in rejeitada.describe()
+
 
 class TestSummarizeBatch:
     def test_resumo_inclui_removidas_invalidas_e_rejeicoes(self):
@@ -94,3 +102,15 @@ class TestDuplicateOriginalFids:
     def test_detecta_repeticoes_ignorando_nulos(self):
         fids = [10, 11, 11, None, None, 0, 12, 12, 12]
         assert find_duplicate_original_fids(fids) == {11: 2, 12: 3}
+
+
+def test_estado_ausente_permanece_pendente():
+    result = reprocessing_outcome(None, None)
+    assert result.ok is False
+    assert "pendente" in result.label.lower()
+
+
+def test_recalculo_nao_necessario_e_terminal_sem_erro():
+    result = reprocessing_outcome("NOT_REQUIRED", None)
+    assert result.ok is True
+    assert "não necessário" in result.label.lower()

@@ -1,33 +1,24 @@
-"""Task para upload de edicoes zonais (export + POST + polling).
-
-Usa osgeo.ogr para export GPKG em worker thread,
-evitando criar QgsVectorLayer fora da main thread.
-"""
+"""Envio idempotente de edições e acompanhamento separado do recálculo."""
 
 import os
-import shutil
-import tempfile
 import time
-import zipfile
-
-from urllib.parse import urlparse
+from datetime import datetime, timezone
+from urllib.parse import urljoin, urlparse
 
 import requests
 
-from qgis.core import Qgis
+from qgis.PyQt.QtCore import QLockFile
 
 from .base_task import SatIrrigaTask
 from ...domain.models.enums import UploadBatchStatusEnum
+from ...domain.services.gpkg_service import update_sidecar
 from ...domain.services.upload_feedback import is_terminal_zonal_status
-
+from ...domain.services.upload_package import archive_path, prepare_operation, save_operation
 
 class UploadZonalTask(SatIrrigaTask):
-    """Exporta todas as features, envia via POST multipart, faz polling."""
-
     def __init__(self, upload_url, checkout_url, access_token, gpkg_source_path,
                  zonal_id, edit_token, expected_version,
-                 conflict_strategy="REJECT_CONFLICTS",
-                 zonal_status_url=None):
+                 conflict_strategy="REJECT_CONFLICTS", zonal_status_url=None):
         super().__init__(f"Upload zonal {zonal_id}")
         self._url = upload_url
         self._checkout_url = checkout_url
@@ -39,353 +30,243 @@ class UploadZonalTask(SatIrrigaTask):
         self._conflict_strategy = conflict_strategy
         self._zonal_status_url = zonal_status_url
         self._batch_uuid = None
+        self._operation = None
+        self._result = {
+            "uploadPersisted": False, "reprocessingStatus": "PENDING",
+            "reprocessingError": None, "pendingGeoids": 0, "pending": True,
+            "zonalId": zonal_id, "error": None,
+        }
 
     @property
     def batch_uuid(self):
         return self._batch_uuid
 
+    @property
+    def result(self):
+        return dict(self._result)
+
     def _update_sidecar(self, checkout_data):
-        """Atualiza sidecar com token fresco do re-checkout."""
+        update_sidecar(self._source_path, lambda sidecar: sidecar.update({
+            "editToken": checkout_data["editToken"],
+            "expiresAt": checkout_data.get("expiresAt", sidecar.get("expiresAt")),
+        }))
+
+    def _renew_checkout(self, headers):
+        self.signals.status_message.emit("Obtendo token de edição...")
         try:
-            from ...domain.services.gpkg_service import read_sidecar, write_sidecar
-            sidecar = read_sidecar(self._source_path)
-            sidecar["editToken"] = checkout_data["editToken"]
-            sidecar["zonalVersion"] = checkout_data.get("zonalVersion", sidecar.get("zonalVersion"))
-            sidecar["snapshotHash"] = checkout_data.get("snapshotHash", sidecar.get("snapshotHash"))
-            sidecar["expiresAt"] = checkout_data.get("expiresAt", sidecar.get("expiresAt"))
-            write_sidecar(self._source_path, sidecar)
-        except Exception as e:
-            self._log(f"[Upload] Erro ao atualizar sidecar: {e}")
+            response = requests.post(self._checkout_url, headers=headers, timeout=30)
+        except requests.RequestException as error:
+            self._log(f"[Upload] Renovação indisponível: {error}")
+            return
+        if response.status_code == 200:
+            data = response.json()
+            self._edit_token = data["editToken"]
+            self._update_sidecar(data)
+        elif response.status_code == 409:
+            raise ValueError("Zonal em edição por outro usuário. Aguarde a liberação para enviar.")
+        else:
+            response.raise_for_status()
+
+    def _save_operation(self, **metadata):
+        save_operation(self._source_path, self._operation, **metadata)
+
+    def _poll_url(self):
+        poll_url = self._operation.get("pollUrl")
+        if not poll_url:
+            raise ValueError("Servidor não retornou o endereço de acompanhamento do lote.")
+        absolute = urljoin(self._url, poll_url)
+        if urlparse(absolute)[:2] != urlparse(self._url)[:2]:
+            raise ValueError("Endereço de acompanhamento fora do servidor de upload.")
+        return absolute
+
+    def _send(self, headers):
+        try:
+            self._renew_checkout(headers)
+        except (ValueError, requests.HTTPError) as error:
+            # O servidor devolve o recibo de uma operação já recebida antes de conferir o token de edição.
+            if not self._operation.get("submitted"):
+                raise
+            self._log(f"[Upload] Renovação recusada; consultando o recibo da operação já enviada: {error}")
+        if self.isCanceled():
+            raise InterruptedError("Envio cancelado antes da transmissão.")
+        self.signals.status_message.emit("Enviando para o servidor...")
+        self._operation["submitted"] = True
+        self._save_operation()
+        data = {
+            "protocolVersion": "2", "operationId": self._operation["operationId"],
+            "baseVersion": str(self._operation["baseVersion"]),
+            "expectedVersion": str(self._operation["baseVersion"]),
+            "baseSnapshotHash": self._operation["baseSnapshotHash"],
+            "editToken": self._edit_token,
+            "conflictStrategy": self._operation["conflictStrategy"],
+        }
+        with open(archive_path(self._source_path, self._operation), "rb") as stream:
+            response = requests.post(
+                self._url, headers=headers,
+                files={"file": ("upload.zip", stream, "application/zip")},
+                data=data, timeout=300,
+            )
+        if response.status_code not in (200, 202):
+            try:
+                message = response.json().get("message") or response.text[:200]
+            except ValueError:
+                message = response.text[:200]
+            self._operation["lastHttpError"] = {"status": response.status_code, "message": message}
+            if response.status_code in (400, 401, 403, 404, 409, 413, 415, 422):
+                self._operation["submitted"] = False
+                self._result["pending"] = False
+            self._save_operation()
+            raise ValueError(f"Envio recusado (HTTP {response.status_code}): {message}")
+        receipt = response.json()
+        self._batch_uuid = receipt.get("batchUuid")
+        self._operation.update({"response": receipt, "batchUuid": self._batch_uuid,
+                                "pollUrl": receipt.get("pollUrl")})
+        self._result["batchUuid"] = self._batch_uuid
+        self._save_operation()
+        if not self._batch_uuid:
+            raise ValueError("Servidor não retornou a identidade do lote.")
+
+    def _record_status(self, data):
+        if data.get("batchUuid") and data["batchUuid"] != self._batch_uuid:
+            raise ValueError("O status recebido pertence a outro lote.")
+        if data.get("operationId") and data["operationId"] != self._operation["operationId"]:
+            raise ValueError("O status recebido pertence a outra operação.")
+        status = data.get("status", self._operation.get("status"))
+        previous_status = self._operation.get("lastStatus")
+        self._operation.update({"status": status, "lastStatus": data})
+        persisted = self._result["uploadPersisted"] or status == "COMPLETED"
+        self._result.update({
+            "batchStatus": status, "uploadPersisted": persisted, "error": None,
+            "batchUuid": self._batch_uuid,
+            "pendingGeoids": data.get("pendingGeoids") or 0,
+            "expectedVersion": data.get("expectedVersion", self._result.get("expectedVersion")),
+        })
+        if data.get("reprocessingStatus"):
+            self._result["reprocessingStatus"] = data["reprocessingStatus"]
+            self._result["reprocessingError"] = data.get("reprocessingError")
+        if data != previous_status:
+            metadata = {"needsRedownload": True, "uploadedAt": datetime.now(timezone.utc).isoformat()} if persisted else {}
+            self._save_operation(**metadata)
+
+    def _emit_result(self, phase, message):
+        self._result["phase"] = phase
+        self._result["message"] = message
+        self.signals.status_message.emit(message)
+        self.signals.upload_progress.emit(self.result)
+
+    def _pending(self, error=None):
+        self._result.update({"pending": True, "error": str(error) if error else None})
+        if self._result["uploadPersisted"]:
+            self._emit_result("reprocessing_timeout", "Envio persistido; recálculo ainda pendente no servidor")
+            return True
+        self._emit_result("upload_pending", "Envio pendente de confirmação; retome o acompanhamento do lote")
+        self._exception = error or TimeoutError(self._result["message"])
+        return False
+
+    def _finish_reprocessing(self, data):
+        status = self._result["reprocessingStatus"]
+        self._result.update({"pending": False, "lastError": self._result["reprocessingError"]})
+        if status == "FAILED":
+            self._result["zonalStatus"] = data.get("zonalStatus") or "FAILED"
+            message = "Envio persistido; recálculo com falha"
+        elif status == "NOT_REQUIRED":
+            self._result["zonalStatus"] = "NOT_REQUIRED"
+            message = "Envio persistido; recálculo não necessário"
+        else:
+            self._result["zonalStatus"] = data.get("zonalStatus") or "DONE"
+            message = "Envio persistido; recálculo concluído"
+        self.setProgress(100)
+        self._emit_result("reprocessing_done", message)
+        return True
+
+    def _wait_reprocessing(self, headers, initial):
+        if not initial.get("reprocessingStatus"):
+            legacy = self._poll_reprocessing(headers) if self._zonal_status_url else None
+            if legacy is None:
+                self._result["reprocessingStatus"] = "PROCESSING"
+                return self._pending()
+            legacy_status = legacy.get("status")
+            self._result.update({
+                "reprocessingStatus": "DONE" if legacy_status in ("DONE", "CONSOLIDATED", "AGUARDANDO") else "FAILED",
+                "reprocessingError": legacy.get("lastError"), "pendingGeoids": legacy.get("pendingGeoids") or 0,
+            })
+            return self._finish_reprocessing({"zonalStatus": legacy_status})
+        data = initial
+        for _ in range(600):
+            if self._result["reprocessingStatus"] in ("DONE", "FAILED", "NOT_REQUIRED"):
+                return self._finish_reprocessing(data)
+            if self.isCanceled():
+                return self._pending()
+            self._result["zonalStatus"] = data.get("zonalStatus") or "PROCESSING"
+            self._emit_result("reprocessing", "Envio persistido; recalculando overlay e estatísticas zonais...")
+            time.sleep(3)
+            try:
+                response = requests.get(self._poll_url(), headers=headers, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+                self._record_status(data)
+            except (requests.RequestException, ValueError) as error:
+                self._result["error"] = str(error)
+        if self._result["reprocessingStatus"] in ("DONE", "FAILED", "NOT_REQUIRED"):
+            return self._finish_reprocessing(data)
+        return self._pending(self._result["error"])
 
     def run(self):
-        temp_dir = None
-        try:
-            self.signals.status_message.emit("Preparando upload...")
-            self.setProgress(5)
-
-            # ----------------------------------------------------------
-            # 1. Export GPKG via GDAL/OGR (0-25%)
-            # ----------------------------------------------------------
-            from osgeo import ogr, gdal
-            gdal.UseExceptions()
-
-            src_ds = ogr.Open(self._source_path, 0)
-            if src_ds is None:
-                self._exception = Exception(f"GPKG invalido: {self._source_path}")
-                return False
-
-            src_lyr = src_ds.GetLayer(0)
-            if src_lyr is None:
-                src_ds = None
-                self._exception = Exception(f"GPKG sem layers: {self._source_path}")
-                return False
-
-            temp_dir = tempfile.mkdtemp(prefix="satirriga_upload_")
-            temp_gpkg = os.path.join(temp_dir, "upload.gpkg")
-
-            # Remove campos internos do export (_edit_token, _sync_timestamp, _zonal_id)
-            # Preserva _original_fid e _sync_status (servidor usa para classificar)
-            internal_fields = {"_edit_token", "_sync_timestamp", "_zonal_id",
-                               "_mapeamento_id", "_metodo_id"}
-
-            src_defn = src_lyr.GetLayerDefn()
-            field_mapping = []  # (src_idx, field_defn) para campos a copiar
-            for i in range(src_defn.GetFieldCount()):
-                fd = src_defn.GetFieldDefn(i)
-                if fd.GetName() not in internal_fields:
-                    field_mapping.append((i, fd))
-
-            src_srs = src_lyr.GetSpatialRef()
-            if src_srs is None:
-                from osgeo import osr
-                src_srs = osr.SpatialReference()
-                src_srs.ImportFromEPSG(4326)
-
-            gpkg_drv = ogr.GetDriverByName("GPKG")
-            dst_ds = gpkg_drv.CreateDataSource(temp_gpkg)
-            if dst_ds is None:
-                src_ds = None
-                self._exception = Exception(f"Erro ao criar GPKG temp: {temp_gpkg}")
-                return False
-
-            dst_lyr = dst_ds.CreateLayer(
-                "upload", srs=src_srs, geom_type=src_lyr.GetGeomType(),
-                options=["FID=fid"],
-            )
-            for _, fd in field_mapping:
-                dst_lyr.CreateField(fd)
-
-            dst_defn = dst_lyr.GetLayerDefn()
-            total_features = src_lyr.GetFeatureCount()
-            dst_lyr.StartTransaction()
-
-            for i, src_feat in enumerate(src_lyr):
-                if self.isCanceled():
-                    dst_lyr.RollbackTransaction()
-                    src_ds = None
-                    dst_ds = None
-                    return False
-                dst_feat = ogr.Feature(dst_defn)
-                geom = src_feat.GetGeometryRef()
-                if geom is not None:
-                    dst_feat.SetGeometry(geom.Clone())
-                for new_idx, (old_idx, _) in enumerate(field_mapping):
-                    dst_feat.SetField(new_idx, src_feat.GetField(old_idx))
-                dst_lyr.CreateFeature(dst_feat)
-                if total_features > 0:
-                    self.setProgress(min(25, int((i + 1) * 25 / total_features)))
-
-            dst_lyr.CommitTransaction()
-            src_ds = None
-            dst_ds = None
-            self.setProgress(25)
-
-            if self.isCanceled():
-                return False
-
-            # ----------------------------------------------------------
-            # 2. ZIP (25-30%)
-            # ----------------------------------------------------------
-            self.signals.status_message.emit("Compactando...")
-            temp_zip = os.path.join(temp_dir, "upload.zip")
-            with zipfile.ZipFile(temp_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-                zf.write(temp_gpkg, "upload.gpkg")
-            self.setProgress(30)
-
-            if self.isCanceled():
-                return False
-
-            # ----------------------------------------------------------
-            # 3. Re-checkout para obter token fresco (30-35%)
-            # ----------------------------------------------------------
-            self.signals.status_message.emit("Obtendo token de edição...")
-            headers = {"Authorization": f"Bearer {self._token}"}
-
-            self._log(f"[HTTP] POST {self._checkout_url} (re-checkout)")
-            try:
-                checkout_resp = requests.post(
-                    self._checkout_url, headers=headers, timeout=30,
-                )
-                self._log(f"[HTTP] {checkout_resp.status_code} {self._checkout_url}")
-
-                if checkout_resp.status_code == 200:
-                    checkout_data = checkout_resp.json()
-                    self._edit_token = checkout_data["editToken"]
-                    self._expected_version = checkout_data.get("zonalVersion", self._expected_version)
-                    self._log(
-                        f"[Upload] Re-checkout OK: token={self._edit_token[:8]}... "
-                        f"version={self._expected_version}"
-                    )
-                    # Atualiza sidecar com novo token
-                    self._update_sidecar(checkout_data)
-                elif checkout_resp.status_code == 409:
-                    try:
-                        err_body = checkout_resp.json()
-                        usuario = err_body.get("usuario", "outro usuário")
-                        self._exception = Exception(
-                            f"Zonal em edição por {usuario}. "
-                            f"Aguarde a liberação para enviar."
-                        )
-                    except Exception:
-                        self._exception = Exception(
-                            "Zonal em edição por outro usuário."
-                        )
-                    return False
-                else:
-                    self._log(
-                        f"[Upload] Re-checkout falhou ({checkout_resp.status_code}), "
-                        f"tentando upload com token existente"
-                    )
-            except requests.RequestException as e:
-                self._log(f"[Upload] Re-checkout falhou: {e}, tentando com token existente")
-
-            self.setProgress(35)
-
-            if self.isCanceled():
-                return False
-
-            # ----------------------------------------------------------
-            # 4. POST multipart (35-50%)
-            # ----------------------------------------------------------
-            self.signals.status_message.emit("Enviando para servidor...")
-
-            self._log(f"[HTTP] POST {self._url} (auth=True, multipart)")
-            with open(temp_zip, "rb") as f:
-                files = {"file": ("upload.zip", f, "application/zip")}
-                data = {
-                    "editToken": self._edit_token,
-                    "expectedVersion": str(self._expected_version),
-                    "conflictStrategy": self._conflict_strategy,
-                }
-                response = requests.post(
-                    self._url, headers=headers,
-                    files=files, data=data, timeout=300,
-                )
-            self._log(f"[HTTP] {response.status_code} {self._url}")
-
-            if response.status_code == 403:
-                # Extrai mensagem real do servidor para diagnostico
-                try:
-                    err_body = response.json()
-                    server_code = err_body.get("code", "")
-                    server_msg = err_body.get("message", "")
-                    self._log(
-                        f"[Upload] 403 code={server_code} message={server_msg} "
-                        f"editToken={self._edit_token[:8]}..."
-                    )
-                except Exception:
-                    server_msg = response.text[:200]
-                    self._log(f"[Upload] 403 body={server_msg}")
-
-                self._exception = Exception(
-                    server_msg or
-                    "Token de edicao invalido ou expirado. "
-                    "Faca novo download do zonal."
-                )
-                return False
-            elif response.status_code == 409:
-                self._exception = Exception(
-                    "Upload concorrente detectado. Tente novamente."
-                )
-                return False
-            elif response.status_code != 202:
-                self._exception = Exception(
-                    f"Servidor retornou HTTP {response.status_code}: "
-                    f"{response.text[:200]}"
-                )
-                return False
-
-            resp_data = response.json()
-            self._batch_uuid = resp_data.get("batchUuid", "")
-            poll_url = resp_data.get("pollUrl", "")
-
-            if not poll_url:
-                self._exception = Exception("Servidor nao retornou pollUrl")
-                return False
-
-            # pollUrl pode ser relativo ("/api/..."), precisa de URL absoluta
-            if poll_url.startswith("/"):
-                parsed = urlparse(self._url)
-                poll_url = f"{parsed.scheme}://{parsed.netloc}{poll_url}"
-
-            self.setProgress(50)
-
-            # ----------------------------------------------------------
-            # 4. Polling (50-95%)
-            # ----------------------------------------------------------
-            self.signals.status_message.emit("Processando no servidor...")
-
-            max_polls = 150  # 150 * 2s = 5 min timeout
-            poll_count = 0
-            last_status = ""
-
-            while poll_count < max_polls:
-                if self.isCanceled():
-                    return False
-
-                time.sleep(2)
-                poll_count += 1
-
-                poll_resp = requests.get(
-                    poll_url, headers=headers, timeout=30,
-                )
-                poll_resp.raise_for_status()
-                status_data = poll_resp.json()
-
-                # Emite progresso para UI
-                self.signals.upload_progress.emit(status_data)
-
-                batch_status = status_data.get("status", "")
-                progress_pct = status_data.get("progressPct", 0)
-                conflict_count = status_data.get("conflictCount", 0)
-
-                # Log apenas quando status muda
-                if batch_status != last_status:
-                    self._log(f"[HTTP] {poll_resp.status_code} {poll_url}")
-                    last_status = batch_status
-
-                # Atualiza progresso: 50 + progressPct * 0.45 (cap em 95)
-                self.setProgress(min(95, 50 + int(progress_pct * 0.45)))
-
-                try:
-                    status_enum = UploadBatchStatusEnum(batch_status)
-                    self.signals.status_message.emit(status_enum.label)
-                except ValueError:
-                    self.signals.status_message.emit(batch_status)
-
-                # Conflitos detectados
-                if batch_status == "CONFLICT_CHECKING" and conflict_count > 0:
-                    self.signals.conflict_detected.emit(self._batch_uuid)
-
-                # Status terminal
-                try:
-                    status_enum = UploadBatchStatusEnum(batch_status)
-                    if status_enum.is_terminal:
-                        break
-                except ValueError:
-                    pass
-            else:
-                self._exception = Exception(
-                    f"Timeout: servidor nao concluiu em 5 minutos "
-                    f"(ultimo status: {batch_status})"
-                )
-                return False
-
-            # ----------------------------------------------------------
-            # 5. Resultado (95-100%)
-            # ----------------------------------------------------------
-            self.setProgress(95)
-
-            if batch_status == UploadBatchStatusEnum.COMPLETED.value:
-                self._log(f"Upload zonal {self._zonal_id} concluido: batch {self._batch_uuid}")
-
-                # Fase 2: monitorar reprocessamento (overlay + zonal stats)
-                final_status = None
-                if self._zonal_status_url:
-                    final_status = self._poll_reprocessing(headers)
-
-                self.setProgress(100)
-                if self._zonal_status_url and final_status is None:
-                    self.signals.status_message.emit("Recálculo em andamento no servidor")
-                    self.signals.upload_progress.emit({
-                        "phase": "reprocessing_timeout",
-                        "zonalId": self._zonal_id,
-                    })
-                    return True
-
-                final_status = final_status or {}
-                self.signals.status_message.emit("Concluído")
-                self.signals.upload_progress.emit({
-                    "phase": "reprocessing_done",
-                    "zonalId": self._zonal_id,
-                    "zonalStatus": final_status.get("status"),
-                    "lastError": final_status.get("lastError"),
-                    "pendingGeoids": final_status.get("pendingGeoids", 0),
-                })
-                return True
-            elif batch_status == UploadBatchStatusEnum.FAILED.value:
-                error_log = status_data.get("errorLog", "Erro desconhecido")
-                self._exception = Exception(f"Upload falhou: {error_log}")
-                return False
-            elif batch_status == UploadBatchStatusEnum.CANCELLED.value:
-                self._exception = Exception("Upload cancelado pelo servidor")
-                return False
-            else:
-                self._exception = Exception(f"Status inesperado: {batch_status}")
-                return False
-
-        except requests.RequestException as e:
-            self._exception = Exception(f"Erro de upload: {e}")
+        lock = QLockFile(os.path.join(os.path.dirname(os.path.realpath(self._source_path)), ".satirriga-upload.lock"))
+        lock.setStaleLockTime(0)
+        if not lock.tryLock(0):
+            self._exception = ValueError("Já existe uma operação em andamento para este GeoPackage.")
             return False
-        except Exception as e:
-            self._exception = e
+        try:
+            self.signals.status_message.emit("Preparando envio...")
+            self._operation = prepare_operation(
+                self._source_path, self._url, self._expected_version,
+                self._conflict_strategy, self.isCanceled,
+            )
+            self._batch_uuid = self._operation.get("batchUuid")
+            self._result.update({"operationId": self._operation["operationId"], "batchUuid": self._batch_uuid,
+                                 "baseVersion": self._operation["baseVersion"]})
+            if self._operation.get("status") == "COMPLETED":
+                self._result["uploadPersisted"] = True
+            headers = {"Authorization": f"Bearer {self._token}"}
+            if not self._batch_uuid:
+                self._send(headers)
+            self.setProgress(50)
+            for _ in range(150):
+                if self.isCanceled():
+                    return self._pending()
+                response = requests.get(self._poll_url(), headers=headers, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+                self._record_status(data)
+                status = data.get("status")
+                self.signals.upload_progress.emit({**data, **self.result})
+                if status == "COMPLETED":
+                    return self._wait_reprocessing(headers, data)
+                if status in ("FAILED", "CANCELLED"):
+                    self._result["pending"] = False
+                    raise ValueError(f"Envio não persistido: {data.get('errorLog') or status}")
+                if status == "CONFLICT_CHECKING" and data.get("conflictCount", 0) > 0:
+                    self.signals.conflict_detected.emit(self._batch_uuid)
+                try:
+                    self.signals.status_message.emit(UploadBatchStatusEnum(status).label)
+                except ValueError:
+                    self.signals.status_message.emit(str(status or "Aguardando confirmação"))
+                self.setProgress(min(95, 50 + int((data.get("progressPct") or 0) * 0.45)))
+                time.sleep(2)
+            return self._pending()
+        except requests.RequestException as error:
+            return self._pending(error)
+        except Exception as error:
+            self._exception = error
+            self._result["error"] = str(error)
             return False
         finally:
-            if temp_dir and os.path.exists(temp_dir):
-                try:
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-                except Exception:
-                    pass
+            lock.unlock()
+
+    def finished(self, result):
+        message = self._result.get("message") if result else str(self._exception or "Envio interrompido")
+        self.signals.completed.emit(bool(result), message or "Envio persistido; aguardando recálculo")
 
     def _poll_reprocessing(self, headers):
         """Monitora reprocessamento pos-upload (overlay + zonal stats).
@@ -450,7 +331,7 @@ class UploadZonalTask(SatIrrigaTask):
 
                 if is_terminal_zonal_status(zonal_status):
                     self._log(
-                        f"[Reprocessamento] Concluido: "
+                        f"[Reprocessamento] Estado terminal: "
                         f"zonal.status={zonal_status} "
                         f"lastError={data.get('lastError')}"
                     )
@@ -461,7 +342,7 @@ class UploadZonalTask(SatIrrigaTask):
                 continue
 
         self._log(
-            "[Reprocessamento] Timeout 30min — upload ja esta COMPLETED, "
+            "[Reprocessamento] Timeout 30min: upload ja esta COMPLETED, "
             "reprocessamento continua no servidor"
         )
         return None

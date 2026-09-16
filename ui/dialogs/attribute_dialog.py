@@ -588,6 +588,14 @@ class AttributeEditDialog(QDialog):
 
     def _save(self):
         """Salva atributos via dataProvider — sem startEditing/commitChanges."""
+        from qgis.PyQt.QtWidgets import QMessageBox
+        from ...domain.services.gpkg_service import read_sidecar, has_pending_upload
+
+        metadata = read_sidecar(self._layer.source().split("|")[0])
+        if (self._layer.readOnly() or metadata.get("readOnly")
+                or metadata.get("needsRedownload") or has_pending_upload(metadata)):
+            QMessageBox.warning(self, "Edição indisponível", "A camada está bloqueada. Conclua o envio e faça novo download antes de editar.")
+            return
         fields = self._layer.fields()
         attr_changes = {}  # {field_idx: new_value}
 

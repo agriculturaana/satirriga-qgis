@@ -2,6 +2,8 @@
 
 import json
 import os
+import tempfile
+import threading
 from pathlib import Path
 
 from qgis.core import QgsApplication
@@ -24,9 +26,11 @@ SYNC_FIELDS_V2 = [
     ("_sync_timestamp", "TEXT"),
     ("_zonal_id", "INTEGER"),
     ("_edit_token", "TEXT"),
+    ("_client_feature_id", "TEXT"),
 ]
 
 SIDECAR_FILENAME = ".satirriga.json"
+_SIDECAR_LOCK = threading.RLock()
 
 
 def gpkg_base_dir(configured_dir: str = "") -> str:
@@ -79,8 +83,38 @@ def sidecar_path(gpkg_path_str: str) -> str:
 def write_sidecar(gpkg_path_str: str, data: dict):
     """Grava JSON de metadados de checkout ao lado do GPKG."""
     path = sidecar_path(gpkg_path_str)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    with _SIDECAR_LOCK:
+        fd, temporary = tempfile.mkstemp(prefix=".satirriga-", suffix=".json", dir=os.path.dirname(path))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(data, stream, indent=2, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+
+def update_sidecar(gpkg_path_str, update):
+    """Aplica uma alteração aos metadados sem perder gravações concorrentes no processo.
+
+    Um sidecar existente e ilegível não é substituído, pois guarda a revisão-base e o histórico de envios.
+    """
+    path = sidecar_path(gpkg_path_str)
+    with _SIDECAR_LOCK:
+        data = {}
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as stream:
+                    data = json.load(stream)
+                if not isinstance(data, dict):
+                    raise ValueError("o conteúdo não é um objeto JSON")
+            except (ValueError, OSError) as error:
+                raise ValueError("Metadados locais ilegíveis; faça novo download antes de continuar.") from error
+        update(data)
+        write_sidecar(gpkg_path_str, data)
+        return data
 
 
 def read_sidecar(gpkg_path_str: str) -> dict:
@@ -93,6 +127,11 @@ def read_sidecar(gpkg_path_str: str) -> dict:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return {}
+
+
+def has_pending_upload(sidecar):
+    return any(operation.get("submitted") and operation.get("status") not in ("COMPLETED", "FAILED", "CANCELLED")
+               for operation in sidecar.get("uploadOperations", []))
 
 
 def detect_gpkg_version(gpkg_path_str: str) -> int:

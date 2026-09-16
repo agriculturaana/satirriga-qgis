@@ -343,22 +343,28 @@ class MapeamentosTab(QWidget):
         }
 
         is_polling = self._controller.is_polling(item.id)
+        # O servidor já declarou o cálculo parado; voltar a acompanhá-lo só
+        # recriaria o card a cada consulta.
+        resumable = item.status in _intermediate and self._controller.is_resumable(item.id)
 
         # Card que chega do catálogo já em status intermediário (ex.:
         # reprocessamento iniciado em outra sessão): inscreve no polling para
         # o card se atualizar sozinho quando o servidor concluir.
-        if item.status in _intermediate and not is_polling:
+        if item.status in _intermediate and not is_polling and not resumable:
             self._controller.start_polling_zonal(item.id)
             is_polling = True
 
-        if item.status in _reprocessable and not is_polling:
+        if (item.status in _reprocessable or resumable) and not is_polling:
             # Botão Reprocessar
             btn_reprocess = QPushButton(
                 tinted_icon(os.path.join(_ICONS_DIR, "action_rotate_cw.svg"), "#FFFFFF"),
                 "Reprocessar",
             )
             btn_reprocess.setIconSize(QSize(14, 14))
-            btn_reprocess.setToolTip("Reenviar para processamento de overlay")
+            btn_reprocess.setToolTip(
+                "Retomar cálculo sem conclusão há mais de duas horas" if resumable
+                else "Reenviar para processamento de overlay"
+            )
             btn_reprocess.setStyleSheet(
                 "QPushButton { background-color: #FF9800; color: white;"
                 " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
@@ -848,9 +854,9 @@ class MapeamentosTab(QWidget):
                 self._progress_labels.pop(zonal_id, None)
                 return
 
-        # Status terminal: refresh para recriar card com widget correto
+        # Status terminal ou cálculo retomável: refresh para recriar card com widget correto
         _intermediate = {"PROCESSING", "OVERLAID", "CREATED", "CONSOLIDATING"}
-        if status not in _intermediate:
+        if status not in _intermediate or self._controller.is_resumable(zonal_id):
             self._request_page()
 
     def _on_zonal_finalizado(self, zonal_id, new_status):

@@ -49,7 +49,7 @@ class TestBuildFieldGroups:
         groups = build_field_groups()
         medidas = next(g for g in groups if g.name == "medidas")
         for f in medidas.fields:
-            assert f.widget_type == FieldWidgetType.NUMERIC
+            assert f.widget_type in (FieldWidgetType.NUMERIC, FieldWidgetType.READ_ONLY)
 
     def test_metadados_has_date_fields(self):
         groups = build_field_groups()
@@ -80,9 +80,18 @@ class TestGetFieldSpec:
         spec = get_field_spec("observacao")
         assert spec.widget_type == FieldWidgetType.MULTILINE
 
-    def test_area_ha_is_numeric(self):
+    def test_area_ha_is_read_only(self):
         spec = get_field_spec("area_ha")
-        assert spec.widget_type == FieldWidgetType.NUMERIC
+        assert spec.widget_type == FieldWidgetType.READ_ONLY
+        assert spec.read_only is True
+
+    @pytest.mark.parametrize("name", ["ndvi", "evi_20", "precipitation_acum5mean", "grupo", "geoid", "tile", "n_vertices"])
+    def test_resultado_cientifico_nao_permite_edicao(self, name):
+        assert get_field_spec(name).read_only is True
+
+    @pytest.mark.parametrize("name", ["id_seg", "nome_municipio", "codigo_bacia", "nome_empreendimento"])
+    def test_atributo_persistido_permanece_editavel(self, name):
+        assert get_field_spec(name).read_only is False
 
 
 class TestIsInternalField:

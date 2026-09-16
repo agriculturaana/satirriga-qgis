@@ -93,6 +93,7 @@ class UploadProgressWidget(QWidget):
     def update_from_status(self, status_data: dict):
         """Atualiza todos os widgets a partir do status do batch."""
         phase = status_data.get("phase", "upload")
+        self._batch_uuid = status_data.get("batchUuid", self._batch_uuid)
 
         # Fase de reprocessamento (overlay + zonal stats)
         if phase == "reprocessing":
@@ -119,8 +120,8 @@ class UploadProgressWidget(QWidget):
 
         if phase == "reprocessing_done":
             outcome = reprocessing_outcome(
-                status_data.get("zonalStatus"),
-                status_data.get("lastError"),
+                status_data.get("reprocessingStatus") or status_data.get("zonalStatus"),
+                status_data.get("reprocessingError") or status_data.get("lastError"),
                 status_data.get("pendingGeoids") or 0,
             )
             self._progress_bar.setRange(0, 100)
@@ -133,8 +134,7 @@ class UploadProgressWidget(QWidget):
             return
 
         if phase == "reprocessing_timeout":
-            self._progress_bar.setRange(0, 100)
-            self._progress_bar.setValue(100)
+            self._progress_bar.setRange(0, 0)
             self._cancel_btn.setEnabled(False)
             self._status_label.setText("Recálculo em andamento no servidor")
             self._status_label.setStyleSheet("font-size: 11px; color: #2196F3;")
@@ -143,6 +143,13 @@ class UploadProgressWidget(QWidget):
                 "continua no servidor e o mapeamento ficará disponível ao terminar; "
                 "acompanhe o status na aba Mapeamentos."
             )
+            return
+
+        if phase == "upload_pending":
+            self._progress_bar.setRange(0, 0)
+            self._cancel_btn.setEnabled(False)
+            self._status_label.setText("Envio pendente de confirmação")
+            self._detail_label.setText("Retome o envio para consultar o recibo preservado desta operação.")
             return
 
         # Fase de upload (comportamento existente)
@@ -160,6 +167,7 @@ class UploadProgressWidget(QWidget):
             if status_enum.is_terminal:
                 self._cancel_btn.setEnabled(False)
                 if status_enum == UploadBatchStatusEnum.COMPLETED:
+                    self._status_label.setText("Envio persistido")
                     self._status_label.setStyleSheet("font-size: 11px; color: #4CAF50;")
                 elif status_enum == UploadBatchStatusEnum.FAILED:
                     self._status_label.setStyleSheet("font-size: 11px; color: #F44336;")

@@ -9,6 +9,7 @@ from ..models.enums import ZonalStatusEnum
 REJECTION_LABELS = {
     "SLIVER": "área menor que 900 m²",
     "DUPLICATE_FEATURE": "cópia idêntica de feição já enviada",
+    "ORIGIN_REJECTED": "outra parte da mesma feição foi rejeitada",
     "STALE_DELETED": "feição removida no servidor em versão posterior",
     "UNKNOWN_ORIGINAL_FID": "identificador de origem desconhecido",
     "INVALID_TOPOLOGY": "geometria inválida",
@@ -127,15 +128,20 @@ def is_terminal_zonal_status(status) -> bool:
 
 def reprocessing_outcome(status, last_error: Optional[str], pending_geoids: int = 0) -> ReprocessingOutcome:
     """Traduz o status final do zonal após o upload em rótulo, cor e mensagem."""
-    if not status:
-        return ReprocessingOutcome(True, "", "Concluído", "#4CAF50",
-                                   "Upload e reprocessamento finalizados")
+    if status == "NOT_REQUIRED":
+        return ReprocessingOutcome(True, status, "Recálculo não necessário", "#4CAF50",
+                                   "Envio persistido; não há recálculo pendente.")
+    if not status or status in INTERMEDIATE_ZONAL_STATUSES or status == "PENDING":
+        return ReprocessingOutcome(False, status or "PENDING", "Recálculo pendente", "#2196F3",
+                                   "O servidor ainda não confirmou o término do recálculo.")
     try:
         enum = ZonalStatusEnum(status)
         label, color = enum.label, enum.color
     except ValueError:
         label, color = str(status), "#9E9E9E"
 
+    if status == "FAILED":
+        label = "Recálculo com falha"
     ok = status in SUCCESS_ZONAL_STATUSES
     if ok:
         message = "Overlay e estatísticas zonais recalculados."

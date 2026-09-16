@@ -167,7 +167,7 @@ class DownloadZonalTask(SatIrrigaTask):
             # ETag para cache condicional
             existing_sidecar = read_sidecar(self._gpkg_path)
             existing_etag = existing_sidecar.get("etag")
-            if existing_etag:
+            if existing_etag and not existing_sidecar.get("needsRedownload"):
                 dl_headers["If-None-Match"] = existing_etag
 
             self._log(f"[HTTP] GET {self._download_url} (auth=True)")
@@ -185,18 +185,14 @@ class DownloadZonalTask(SatIrrigaTask):
                 gpkg_valid = self._validate_existing_gpkg(
                     self._gpkg_path, expected_count,
                 )
-                if gpkg_valid:
+                if gpkg_valid and not existing_sidecar.get("needsRedownload"):
                     self.signals.status_message.emit(
                         "Dados em cache, atualizando checkout..."
                     )
                     sidecar_data = existing_sidecar.copy()
-                    sidecar_data.pop("needsRedownload", None)
                     sidecar_data.update({
                         "editToken": edit_token,
-                        "zonalVersion": zonal_version,
-                        "snapshotHash": snapshot_hash,
                         "expiresAt": expires_at,
-                        "downloadedAt": datetime.now(timezone.utc).isoformat(),
                         "origin": self._origin,
                     })
                     write_sidecar(self._gpkg_path, sidecar_data)
@@ -238,6 +234,13 @@ class DownloadZonalTask(SatIrrigaTask):
                 )
                 return False
             dl_resp.raise_for_status()
+
+            header_version = dl_resp.headers.get("X-Zonal-Version")
+            header_snapshot = dl_resp.headers.get("X-Snapshot-Hash")
+            if header_version is not None:
+                zonal_version = int(header_version)
+            if header_snapshot:
+                snapshot_hash = header_snapshot
 
             header_feature_count = dl_resp.headers.get("X-Feature-Count")
             if header_feature_count is not None:
@@ -399,6 +402,7 @@ class DownloadZonalTask(SatIrrigaTask):
                 "downloadedAt": now_iso,
                 "readOnly": self._read_only,
                 "origin": self._origin,
+                "uploadOperations": existing_sidecar.get("uploadOperations", []),
             }
             # Dados enriquecidos do catalogo
             if self._catalogo_meta:

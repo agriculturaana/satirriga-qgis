@@ -5,7 +5,7 @@ import os
 from urllib.parse import quote
 
 from qgis.PyQt.QtCore import QObject, QTimer, pyqtSignal
-from qgis.core import QgsApplication, QgsVectorLayer, QgsMessageLog, Qgis
+from qgis.core import QgsApplication, QgsVectorLayer, QgsMessageLog, QgsProject, Qgis
 
 from ...infra.config.settings import PLUGIN_NAME
 from ...infra.http.client import HttpClient
@@ -70,6 +70,7 @@ class MapeamentoController(QObject):
         self._pending_poll_ids = {}      # request_id -> zonal_id
         self._pending_status_oneshot_ids = {}  # request_id -> zonal_id (leitura pontual)
         self._polling_zonals = {}        # zonal_id -> {"request_id": None, "errors": 0}
+        self._resumable_zonals = set()   # zonais com cálculo sem conclusão que o servidor aceita retomar
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(1000)
         self._poll_timer.timeout.connect(self._poll_active_zonals)
@@ -83,6 +84,8 @@ class MapeamentoController(QObject):
         self._pending_pareceres_mapeamento_id = None
         self._active_tasks = []
         self._pending_edit_fids = {}
+        self._tracked_edit_layers = set()
+        self._awaiting_edit_tracking = set()
 
         # Conecta signals do HttpClient
         self._http.request_finished.connect(self._on_request_finished)
@@ -303,6 +306,21 @@ class MapeamentoController(QObject):
     def is_polling(self, zonal_id):
         """Retorna True se o zonal está sendo monitorado."""
         return zonal_id in self._polling_zonals
+
+    def is_resumable(self, zonal_id):
+        """Retorna True se o servidor aceita retomar o cálculo sem conclusão do zonal."""
+        return zonal_id in self._resumable_zonals
+
+    def _track_resumable(self, zonal_id, data):
+        if not data.get("resumable"):
+            self._resumable_zonals.discard(zonal_id)
+            return
+        self._resumable_zonals.add(zonal_id)
+        self.stop_polling_zonal(zonal_id)
+        QgsMessageLog.logMessage(
+            f"[Poll] Zonal {zonal_id} sem conclusão desde {data.get('processingSince')}; retomada disponível",
+            PLUGIN_NAME, Qgis.Warning,
+        )
 
     def _poll_active_zonals(self):
         """Slot do QTimer: dispara GET /api/zonal/:id/status para cada zonal ativo."""
@@ -613,6 +631,7 @@ class MapeamentoController(QObject):
                 data = json.loads(body)
                 if status_code < 300:
                     msg = data.get("message", "Reprocessamento iniciado")
+                    self._resumable_zonals.discard(zid)
                     self.start_polling_zonal(zid)
                     self._state.reprocess_overlay_done.emit(zid, msg)
                     QgsMessageLog.logMessage(
@@ -620,6 +639,10 @@ class MapeamentoController(QObject):
                         PLUGIN_NAME, Qgis.Info,
                     )
                 else:
+                    if zid in self._resumable_zonals:
+                        # Retomada recusada: volta a acompanhar o estado informado pelo servidor.
+                        self._resumable_zonals.discard(zid)
+                        self.start_polling_zonal(zid)
                     detail = data.get("message") or data.get("error") or body[:200]
                     self._state.set_error("reprocess", detail)
             except Exception as e:
@@ -666,6 +689,7 @@ class MapeamentoController(QObject):
             try:
                 data = json.loads(body)
                 zonal_status = data.get("status", "")
+                self._track_resumable(zid, data)
                 self._state.zonal_status_polled.emit(zid, zonal_status)
                 # Parar polling se saiu dos estados intermediários
                 _intermediate = {"PROCESSING", "OVERLAID", "CREATED", "CONSOLIDATING"}
@@ -689,14 +713,12 @@ class MapeamentoController(QObject):
             self._pending_renew_gpkg_path = None
             try:
                 from ...domain.services.gpkg_service import (
-                    read_sidecar, write_sidecar,
+                    update_sidecar,
                 )
                 data = json.loads(body)
                 new_expires = data.get("expiresAt")
                 if new_expires and zonal_id and gpkg:
-                    sidecar = read_sidecar(gpkg)
-                    sidecar["expiresAt"] = new_expires
-                    write_sidecar(gpkg, sidecar)
+                    update_sidecar(gpkg, lambda sidecar: sidecar.update({"expiresAt": new_expires}))
                     QgsMessageLog.logMessage(
                         f"editToken renovado para zonal #{zonal_id} até {new_expires}",
                         PLUGIN_NAME, Qgis.Info,
@@ -909,7 +931,7 @@ class MapeamentoController(QObject):
         de camadas.
         """
         from ...infra.tasks.download_task import DownloadZonalTask
-        from ...domain.services.gpkg_service import gpkg_path_for_zonal, gpkg_base_dir
+        from ...domain.services.gpkg_service import gpkg_path_for_zonal, gpkg_base_dir, read_sidecar, has_pending_upload
         from ...domain.models.enums import DownloadOrigin
 
         if not self._state.is_authenticated or not self._token_provider:
@@ -927,6 +949,12 @@ class MapeamentoController(QObject):
         download_url = self._api_url(f"/zonal/{zonal_id}/download-result.gpkg")
         base_dir = gpkg_base_dir(self._config.get("gpkg_base_dir"))
         output_path = gpkg_path_for_zonal(base_dir, zonal_id, origin_key)
+        if self._has_active_gpkg_task(output_path):
+            self._state.set_error(f"download:{zonal_id}", "Há uma operação em andamento para este GeoPackage.")
+            return
+        if has_pending_upload(read_sidecar(output_path)):
+            self._state.set_error(f"download:{zonal_id}", "Há um envio pendente de confirmação. Retome o envio para recuperar o recibo antes de baixar novamente.")
+            return
 
         # Metadados do catalogo para enriquecer sidecar
         catalogo_meta = {"origin": origin_key}
@@ -1076,7 +1104,7 @@ class MapeamentoController(QObject):
     def upload_zonal_edits(self, gpkg_path, conflict_strategy="REJECT_CONFLICTS"):
         """Inicia upload de edicoes via fluxo zonal V2."""
         from ...infra.tasks.upload_task import UploadZonalTask
-        from ...domain.services.gpkg_service import read_sidecar
+        from ...domain.services.gpkg_service import read_sidecar, has_pending_upload
 
         if not self._state.is_authenticated or not self._token_provider:
             self._state.set_error("upload", "Nao autenticado")
@@ -1098,6 +1126,21 @@ class MapeamentoController(QObject):
                 "Metadados de checkout nao encontrados. Faca novo download."
             )
             return
+
+        if self._has_active_gpkg_task(gpkg_path):
+            self._state.set_error("upload", "Já existe um envio em andamento para este GeoPackage.")
+            return
+        layers = [layer for layer in QgsProject.instance().mapLayers().values()
+                  if isinstance(layer, QgsVectorLayer)
+                  and os.path.realpath(layer.source().split("|")[0]) == os.path.realpath(gpkg_path)]
+        if any(layer.isEditable() for layer in layers):
+            self._state.set_error("upload", "Salve e encerre a edição da camada antes de enviar.")
+            return
+        for layer in layers:
+            self._mark_edited_features(layer)
+        locked_layers = [(layer.id(), layer.readOnly() and not has_pending_upload(sidecar)) for layer in layers]
+        for layer in layers:
+            layer.setReadOnly(True)
 
         expires_at = sidecar.get("expiresAt", "?")
         QgsMessageLog.logMessage(
@@ -1126,7 +1169,7 @@ class MapeamentoController(QObject):
 
         task.signals.completed.connect(
             lambda success, msg: self._on_zonal_upload_completed(
-                success, msg, gpkg_path, zonal_id
+                success, msg, gpkg_path, zonal_id, locked_layers
             )
         )
         task.signals.status_message.connect(
@@ -1170,11 +1213,24 @@ class MapeamentoController(QObject):
             feat.attribute(idx) for feat in layer.getFeatures()
         )
 
-    def _on_zonal_upload_completed(self, success, message, gpkg_path, zonal_id):
+    def _on_zonal_upload_completed(self, success, message, gpkg_path, zonal_id, locked_layers=()):
         self._cleanup_finished_tasks()
         self._state.set_loading("upload", False)
+        from ...domain.services.gpkg_service import read_sidecar, has_pending_upload
+        sidecar = read_sidecar(gpkg_path)
+        for layer_id, previous_readonly in locked_layers:
+            layer = QgsProject.instance().mapLayer(layer_id)
+            if layer is not None:
+                layer.setReadOnly(previous_readonly or bool(sidecar.get("needsRedownload")) or has_pending_upload(sidecar))
         if success:
-            self._mark_uploaded(gpkg_path)
+            try:
+                self._mark_uploaded(gpkg_path)
+            except ValueError as error:
+                self._state.set_error("upload", str(error))
+                QgsMessageLog.logMessage(
+                    f"Upload zonal persistido sem atualizar os metadados locais: {error}", PLUGIN_NAME, Qgis.Warning,
+                )
+                return
             self.zonal_upload_completed.emit(gpkg_path, zonal_id)
             QgsMessageLog.logMessage(
                 f"Upload zonal concluido: {gpkg_path}", PLUGIN_NAME, Qgis.Info,
@@ -1189,6 +1245,14 @@ class MapeamentoController(QObject):
     # Helpers
     # ----------------------------------------------------------------
 
+    def _has_active_gpkg_task(self, gpkg_path):
+        path = os.path.realpath(gpkg_path)
+        for task in self._active_tasks:
+            source = getattr(task, "_source_path", None) or getattr(task, "_gpkg_path", None)
+            if source and os.path.realpath(source) == path and task.status() not in (task.Complete, task.Terminated):
+                return True
+        return False
+
     def _cleanup_finished_tasks(self):
         """Remove tasks finalizadas da lista de tasks ativas."""
         self._active_tasks = [
@@ -1197,49 +1261,18 @@ class MapeamentoController(QObject):
         ]
 
     def _mark_uploaded(self, gpkg_path):
-        """Marca features MODIFIED/NEW como UPLOADED no GPKG via dataProvider batch."""
-        from ...domain.models.enums import SyncStatusEnum
         from datetime import datetime, timezone
+        from ...domain.services.gpkg_service import update_sidecar
 
-        layer = QgsVectorLayer(gpkg_path, "mark_uploaded", "ogr")
-        if not layer.isValid():
-            return
-
-        sync_idx = layer.fields().indexOf("_sync_status")
-        ts_idx = layer.fields().indexOf("_sync_timestamp")
-        if sync_idx < 0:
-            return
-
-        now_iso = datetime.now(timezone.utc).isoformat()
-        attr_changes = {}
-        deleted_fids = []
-        for feat in layer.getFeatures():
-            status = feat.attribute(sync_idx)
-            if status in (SyncStatusEnum.MODIFIED.value, SyncStatusEnum.NEW.value):
-                changes = {sync_idx: SyncStatusEnum.UPLOADED.value}
-                if ts_idx >= 0:
-                    changes[ts_idx] = now_iso
-                attr_changes[feat.id()] = changes
-            elif status == SyncStatusEnum.DELETED.value:
-                # Tombstones ja processados pelo servidor — remover do GPKG
-                deleted_fids.append(feat.id())
-
-        provider = layer.dataProvider()
-        if attr_changes:
-            provider.changeAttributeValues(attr_changes)
-        if deleted_fids:
-            provider.deleteFeatures(deleted_fids)
-        if attr_changes or deleted_fids:
-            provider.forceReload()
-
-        # Identificadores e índices das feições enviadas mudam no servidor
-        # durante o recálculo; a cópia local só volta a refletir o servidor
-        # com novo download.
-        from ...domain.services.gpkg_service import read_sidecar, write_sidecar
-        sidecar = read_sidecar(gpkg_path)
-        sidecar["needsRedownload"] = True
-        sidecar["uploadedAt"] = now_iso
-        write_sidecar(gpkg_path, sidecar)
+        # A revisão consumida permanece intacta para repetir o pacote e conferir as exclusões. O bloqueio vem
+        # antes da gravação para que metadados ilegíveis não deixem editável uma cópia já enviada.
+        for layer in QgsProject.instance().mapLayers().values():
+            if isinstance(layer, QgsVectorLayer) and os.path.realpath(layer.source().split("|")[0]) == os.path.realpath(gpkg_path):
+                layer.setReadOnly(True)
+        update_sidecar(gpkg_path, lambda sidecar: sidecar.update({
+            "needsRedownload": True,
+            "uploadedAt": datetime.now(timezone.utc).isoformat(),
+        }))
 
     # ----------------------------------------------------------------
     # Edit tracking
@@ -1257,10 +1290,34 @@ class MapeamentoController(QObject):
         o mecanismo "Remember last entered values" sobrescreva valores
         de controle de sync.
         """
-        from qgis.core import QgsEditorWidgetSetup
-        from ...domain.services.attribute_schema import INTERNAL_FIELDS
+        from qgis.core import QgsEditorWidgetSetup, QgsField
+        from qgis.PyQt.QtCore import QVariant
+        from ...domain.services.gpkg_service import read_sidecar, has_pending_upload
+        from ...domain.services.attribute_schema import INTERNAL_FIELDS, get_field_spec
 
+        sidecar = read_sidecar(layer.source().split("|")[0])
+        if sidecar.get("needsRedownload") or sidecar.get("readOnly") or has_pending_upload(sidecar):
+            layer.setReadOnly(True)
+        if layer.readOnly():
+            # A camada volta a ser editável quando um envio termina sem persistência; o rastreamento acompanha essa mudança.
+            layer_id = layer.id()
+            if layer_id not in self._awaiting_edit_tracking:
+                self._awaiting_edit_tracking.add(layer_id)
+                layer.readOnlyChanged.connect(lambda: self._track_when_editable(layer))
+                layer.destroyed.connect(lambda: self._awaiting_edit_tracking.discard(layer_id))
+            return
+        if layer.id() in self._tracked_edit_layers:
+            return
+        if layer.fields().indexOf("_client_feature_id") < 0:
+            if not layer.dataProvider().addAttributes([QgsField("_client_feature_id", QVariant.String)]):
+                self._state.set_error("edicao", "Não foi possível criar o identificador local das inclusões.")
+                layer.setReadOnly(True)
+                return
+            layer.updateFields()
+        self._tracked_edit_layers.add(layer.id())
+        layer.featureAdded.connect(lambda fid: self._identify_added_feature(layer, fid))
         layer_id = layer.id()
+        layer.destroyed.connect(lambda: self._tracked_edit_layers.discard(layer_id))
         self._pending_edit_fids[layer_id] = {"changed": set(), "deleted_originals": []}
 
         # Oculta campos internos do formulario de atributos
@@ -1271,12 +1328,29 @@ class MapeamentoController(QObject):
                     idx, QgsEditorWidgetSetup("Hidden", {})
                 )
 
+        form = layer.editFormConfig()
+        for index, field in enumerate(layer.fields()):
+            if get_field_spec(field.name()).read_only:
+                form.setReadOnly(index, True)
+        layer.setEditFormConfig(form)
+
         layer.beforeCommitChanges.connect(
             lambda: self._capture_edited_fids(layer)
         )
         layer.afterCommitChanges.connect(
             lambda: QTimer.singleShot(0, lambda: self._mark_edited_features(layer))
         )
+
+    def _track_when_editable(self, layer):
+        if not layer.readOnly():
+            self.connect_edit_tracking(layer)
+
+    def _identify_added_feature(self, layer, fid):
+        import uuid
+
+        # Cópias e divisões herdam atributos; cada inclusão precisa de identidade própria.
+        layer.changeAttributeValue(fid, layer.fields().indexOf("_client_feature_id"), str(uuid.uuid4()))
+        layer.changeAttributeValue(fid, layer.fields().indexOf("_sync_status"), "NEW")
 
     def _capture_edited_fids(self, layer):
         """Captura IDs das features alteradas e deletadas antes do commit.
@@ -1312,14 +1386,16 @@ class MapeamentoController(QObject):
                 deleted_fids = buf.deletedFeatureIds()
                 if deleted_fids:
                     from qgis.core import QgsFeatureRequest
+                    from ...domain.models.enums import SyncStatusEnum
                     ofid_idx = layer.fields().indexOf("_original_fid")
+                    sync_idx = layer.fields().indexOf("_sync_status")
                     if ofid_idx >= 0:
                         req = QgsFeatureRequest().setFilterFids(deleted_fids)
                         for feat in layer.dataProvider().getFeatures(req):
                             original_fid = feat.attribute(ofid_idx)
-                            # So rastreia deleções de features do servidor
-                            # (original_fid > 0; features novas tem 0 ou NULL)
-                            if original_fid is not None and original_fid != 0:
+                            # Cópias e partes de divisão ficam NEW e herdam _original_fid, mas não são a feição do servidor.
+                            inclusion = sync_idx >= 0 and feat.attribute(sync_idx) == SyncStatusEnum.NEW.value
+                            if original_fid is not None and original_fid != 0 and not inclusion:
                                 deleted_originals.append(original_fid)
 
                 QgsMessageLog.logMessage(
@@ -1366,6 +1442,7 @@ class MapeamentoController(QObject):
         from ...domain.models.enums import SyncStatusEnum
         from datetime import datetime, timezone
         from qgis.core import QgsFeature
+        import uuid
 
         layer_id = layer.id()
         fid_data = self._pending_edit_fids.pop(layer_id, None)
@@ -1375,6 +1452,7 @@ class MapeamentoController(QObject):
         sync_idx = layer.fields().indexOf("_sync_status")
         ts_idx = layer.fields().indexOf("_sync_timestamp")
         ofid_idx = layer.fields().indexOf("_original_fid")
+        client_idx = layer.fields().indexOf("_client_feature_id")
         if sync_idx < 0:
             QgsMessageLog.logMessage(
                 "[EditTrack] campo _sync_status nao encontrado na layer",
@@ -1419,9 +1497,9 @@ class MapeamentoController(QObject):
         #       _sync_status = DOWNLOADED em features recem-criadas)
         for feat in layer.getFeatures():
             fid = feat.id()
-            if fid in attr_changes:
-                continue
             status = feat.attribute(sync_idx)
+            if status == SyncStatusEnum.DELETED.value:
+                continue
             original_fid = (
                 feat.attribute(ofid_idx) if ofid_idx >= 0 else None
             )
@@ -1435,6 +1513,9 @@ class MapeamentoController(QObject):
                     changes[ts_idx] = now_iso
                 attr_changes[fid] = changes
                 new_count += 1
+            if client_idx >= 0 and (status == SyncStatusEnum.NEW.value or status_is_null or has_no_server_fid):
+                if not feat.attribute(client_idx):
+                    attr_changes.setdefault(fid, {})[client_idx] = str(uuid.uuid4())
 
         if attr_changes:
             ok = layer.dataProvider().changeAttributeValues(attr_changes)
@@ -1457,7 +1538,11 @@ class MapeamentoController(QObject):
             fields = layer.fields()
             tombstones = []
 
-            for original_fid in deleted_originals:
+            existing_tombstones = {
+                feat.attribute(ofid_idx) for feat in layer.getFeatures()
+                if feat.attribute(sync_idx) == SyncStatusEnum.DELETED.value
+            }
+            for original_fid in set(deleted_originals) - existing_tombstones:
                 tomb = QgsFeature(fields)
                 tomb.setAttribute(sync_idx, SyncStatusEnum.DELETED.value)
                 tomb.setAttribute(ofid_idx, original_fid)

@@ -48,6 +48,7 @@ INTERNAL_FIELDS: Set[str] = {
     "_sync_timestamp",
     "_zonal_id",
     "_edit_token",
+    "_client_feature_id",
 }
 
 
@@ -135,6 +136,35 @@ def _build_schema() -> dict:
          "Usuário que validou a feature")
     _add("data_validacao", "Data Validação", FieldWidgetType.DATE, "metadados",
          "Data em que a feature foi validada")
+
+    calculated = [
+        "area_ha", "area_processada_m2", "perimetro_m", "centroide_lat", "centroide_lng",
+        "n_vertices", "grupo", "geoid", "unique_hash", "source_consolidado_id",
+        "tile", "id_img", "id_img_2", "scan_date", "scan_date_2", "created_at",
+        "consolidado", "homologado", "is_current",
+        *[field + suffix for field in ("evi", "ndvi", "ndwi", "albedo") for suffix in ("", "_20")],
+        *[f"precipitation_acum{days}mean" for days in (5, 10, 15, 20, 25, 30)],
+    ]
+    for name in calculated:
+        previous = specs.get(name)
+        _add(name, previous.label if previous else name.replace("_", " ").title(),
+             FieldWidgetType.READ_ONLY, previous.group if previous else "metadados",
+             "Valor calculado ou controlado pelo servidor.", read_only=True)
+    _add("id_seg", "Identificador do segmento", FieldWidgetType.TEXT, "identificacao")
+    for name, label, group in [
+        ("codigo_empreendimento", "Código do empreendimento", "outorga"),
+        ("nome_empreendimento", "Nome do empreendimento", "outorga"),
+        ("nome_usuario_outorga", "Usuário da outorga", "outorga"),
+        ("cpf_usuario_outorga", "CPF do usuário da outorga", "outorga"),
+        ("cnpj_usuario_outorga", "CNPJ do usuário da outorga", "outorga"),
+        ("numero_interf_narh", "Número de interferência NARH", "outorga"),
+        ("codigo_municipio", "Código do município", "localizacao"),
+        ("nome_municipio", "Município", "localizacao"),
+        ("sigla_uf", "UF", "localizacao"),
+        ("codigo_bacia", "Código da bacia", "localizacao"),
+        ("nome_bacia", "Bacia", "localizacao"),
+    ]:
+        _add(name, label, FieldWidgetType.TEXT, group)
 
     return specs
 

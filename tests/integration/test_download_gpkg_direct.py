@@ -198,6 +198,8 @@ class TestDownloadZonalTaskGpkg:
             headers={
                 "ETag": '"gpkg-v7-42-1"',
                 "X-Feature-Count": "2",
+                "X-Zonal-Version": "9",
+                "X-Snapshot-Hash": "hash-response",
                 "content-length": str(len(gpkg_bytes)),
             },
         )
@@ -222,7 +224,7 @@ class TestDownloadZonalTaskGpkg:
         assert os.path.exists(output_path)
 
         field_names = read_gpkg_field_names(output_path)
-        for field_name in ["_original_fid", "_sync_status", "_sync_timestamp", "_zonal_id", "_edit_token"]:
+        for field_name in ["_original_fid", "_sync_status", "_sync_timestamp", "_zonal_id", "_edit_token", "_client_feature_id"]:
             assert field_name in field_names
         for field_name in ["codigo_empreendimento", "nome_municipio", "sigla_uf", "nome_bacia"]:
             assert field_name in field_names
@@ -239,6 +241,8 @@ class TestDownloadZonalTaskGpkg:
         sidecar = module.read_sidecar(output_path)
         assert sidecar["etag"] == '"gpkg-v7-42-1"'
         assert sidecar["featureCount"] == 2
+        assert sidecar["zonalVersion"] == 9
+        assert sidecar["snapshotHash"] == "hash-response"
         assert sidecar["editToken"] == "tok-edit"
         assert sidecar["origin"] == "mapeamentos"
         assert sidecar["descricao"] == "Teste"
@@ -256,6 +260,8 @@ class TestDownloadZonalTaskGpkg:
             "etag": '"gpkg-v7-42-1"',
             "featureCount": 1,
             "editToken": "old-token",
+            "zonalVersion": 7,
+            "snapshotHash": "hash-downloaded",
             "origin": "mapeamentos",
         })
 
@@ -287,8 +293,8 @@ class TestDownloadZonalTaskGpkg:
 
         sidecar = module.read_sidecar(cached_path)
         assert sidecar["editToken"] == "new-token"
-        assert sidecar["zonalVersion"] == 8
-        assert sidecar["snapshotHash"] == "hash-2"
+        assert sidecar["zonalVersion"] == 7
+        assert sidecar["snapshotHash"] == "hash-downloaded"
         assert sidecar["expiresAt"] == "2026-05-02T00:00:00Z"
 
         get_headers = get_mock.call_args.kwargs["headers"]
