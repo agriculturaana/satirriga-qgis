@@ -291,15 +291,15 @@ def test_recibo_permanece_apos_timeout_do_polling(source, monkeypatch):
     assert resumed.result["pending"] is False
 
 
-def test_pacote_corrompido_nao_e_recriado_apos_timeout(source, monkeypatch):
+def test_pacote_corrompido_nao_e_reenviado_sob_a_mesma_operacao(source, monkeypatch):
     sent = server(monkeypatch, failure=requests.Timeout())
     assert task(source).run() is False
     archive = next((pathlib.Path(source).parent / ".satirriga-upload").glob("*.zip"))
     archive.write_bytes(b"incompleto")
-    retry = task(source)
-    assert retry.run() is False
-    assert len(sent) == 1
-    assert "pacote" in str(retry._exception).lower()
+    assert task(source).run() is False
+    assert len(sent) == 2
+    assert sent[1]["data"]["operationId"] != sent[0]["data"]["operationId"]
+    assert all(item["archive"] != b"incompleto" and item["archive"][:2] == b"PK" for item in sent)
 
 
 def test_mudanca_de_conteudo_sem_recibo_nao_gera_segunda_operacao(source, monkeypatch):
@@ -643,3 +643,71 @@ def test_card_de_calculo_retomavel_e_recriado_quando_o_acompanhamento_encerra():
     tab._request_page = MagicMock()
     tab._on_zonal_status_polled(42, "PROCESSING")
     tab._request_page.assert_called_once()
+
+
+def _download_request(source, monkeypatch):
+    state, config = MagicMock(), MagicMock()
+    config.get.return_value = str(pathlib.Path(source).parent)
+    controller = controller_module.MapeamentoController(state, MagicMock(), config, token_provider=lambda: "token")
+    monkeypatch.setattr(gpkg, "gpkg_path_for_zonal", lambda *args, **kwargs: source)
+    application = MagicMock()
+    monkeypatch.setattr(controller_module, "QgsApplication", application)
+    controller.download_zonal_result(42)
+    return application.taskManager().addTask.called, state.set_error.call_args.args[1] if state.set_error.called else None
+
+
+def _uncertain_server(monkeypatch, failure, recovered):
+    sent = []
+
+    def post(url, **kwargs):
+        if url.endswith("checkout"):
+            return response(editToken="fresh-token", zonalVersion=7, snapshotHash="downloaded-hash")
+        sent.append({"data": dict(kwargs["data"]), "archive": kwargs["files"]["file"][1].read()})
+        if len(sent) > 1:
+            return recovered()
+        if failure is not None:
+            raise failure
+        return response(500, message="Erro interno")
+
+    monkeypatch.setattr(upload.requests, "post", post)
+    monkeypatch.setattr(upload.requests, "get", lambda *a, **k: response(
+        status="COMPLETED", batchUuid="batch-42", progressPct=100, reprocessingStatus="DONE", pendingGeoids=0))
+    return sent
+
+
+def _remove_packages(source):
+    for archive in (pathlib.Path(source).parent / ".satirriga-upload").glob("*.zip"):
+        archive.unlink()
+
+
+@pytest.mark.parametrize("failure", [
+    pytest.param(requests.ConnectionError("Conexão interrompida"), id="rede"),
+    pytest.param(None, id="http500"),
+])
+def test_envio_incerto_sem_pacote_e_refeito_em_nova_operacao_e_libera_o_download(source, monkeypatch, failure):
+    sent = _uncertain_server(monkeypatch, failure, lambda: response(202, batchUuid="batch-42", pollUrl="/api/uploads/batch-42/status"))
+    assert task(source).run() is False
+    _remove_packages(source)
+    started, message = _download_request(source, monkeypatch)
+    assert started is False
+    assert "envie as edições novamente" in message.lower()
+    assert task(source).run() is True
+    assert len(sent) == 2
+    assert sent[1]["data"]["operationId"] != sent[0]["data"]["operationId"]
+    operations = gpkg.read_sidecar(source)["uploadOperations"]
+    assert [(operation["operationId"], bool(operation.get("abandoned"))) for operation in operations] == [
+        (sent[0]["data"]["operationId"], True), (sent[1]["data"]["operationId"], False)]
+    assert _download_request(source, monkeypatch)[0] is True
+
+
+def test_nova_operacao_recusada_pela_base_ja_consumida_libera_o_download(source, monkeypatch):
+    sent = _uncertain_server(monkeypatch, requests.ConnectionError("Conexão interrompida"),
+                             lambda: response(409, code="VERSION_CONFLICT", message="A versão-base não é mais a vigente. Faça novo download."))
+    assert task(source).run() is False
+    _remove_packages(source)
+    retry = task(source)
+    assert retry.run() is False
+    assert len(sent) == 2
+    assert "versão-base" in str(retry._exception)
+    assert gpkg.has_pending_upload(gpkg.read_sidecar(source)) is False
+    assert _download_request(source, monkeypatch)[0] is True

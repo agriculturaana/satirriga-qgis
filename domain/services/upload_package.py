@@ -6,8 +6,9 @@ import os
 import tempfile
 import uuid
 import zipfile
+from datetime import datetime, timezone
 
-from .gpkg_service import read_sidecar, update_sidecar
+from .gpkg_service import has_pending_upload, read_sidecar, update_sidecar
 
 EXCLUDED_FIELDS = {"_edit_token", "_sync_timestamp", "_zonal_id", "_mapeamento_id", "_metodo_id"}
 
@@ -79,6 +80,24 @@ def archive_hash(path):
     return digest.hexdigest()
 
 
+def operation_recoverable(source_path, operation):
+    if operation.get("batchUuid"):
+        return True
+    path = archive_path(source_path, operation)
+    return bool(operation.get("archiveHash")) and os.path.isfile(path) and archive_hash(path) == operation["archiveHash"]
+
+
+def abandon_unrecoverable_operations(source_path, operations):
+    # Sem recibo e sem os bytes originais, a operação não pode ser repetida. A operação seguinte parte da mesma base,
+    # e o servidor recusa a base já consumida (VERSION_CONFLICT) ou o lote ainda em processamento (UPLOAD_IN_PROGRESS).
+    for operation in operations:
+        if operation.get("abandoned") or operation.get("status") in ("COMPLETED", "FAILED", "CANCELLED"):
+            continue
+        if not operation_recoverable(source_path, operation):
+            operation.update(abandoned=True, abandonedAt=datetime.now(timezone.utc).isoformat())
+            save_operation(source_path, operation)
+
+
 def save_operation(source_path, operation, **metadata):
     def merge(sidecar):
         operations = sidecar.setdefault("uploadOperations", [])
@@ -114,20 +133,18 @@ def prepare_operation(source_path, upload_url, expected_version, conflict_strate
              "baseSnapshotHash": snapshot_hash, "conflictStrategy": conflict_strategy,
              "uploadUrl": upload_url}
     operations = sidecar.get("uploadOperations", [])
+    abandon_unrecoverable_operations(source_path, operations)
     for operation in reversed(operations):
-        if all(operation.get(key) == value for key, value in scope.items()):
-            # Um lote encerrado sem persistência não alterou o servidor; o mesmo conteúdo segue em outra operação.
-            if operation.get("status") in ("FAILED", "CANCELLED"):
-                break
-            source = None
-            if not operation.get("batchUuid"):
-                path = archive_path(source_path, operation)
-                if not os.path.isfile(path) or archive_hash(path) != operation["archiveHash"]:
-                    raise ValueError("Pacote original ausente ou alterado. Não é seguro repetir a operação; faça novo download.")
-            return dict(operation)
+        if operation.get("abandoned") or not all(operation.get(key) == value for key, value in scope.items()):
+            continue
+        # Um lote encerrado sem persistência não alterou o servidor; o mesmo conteúdo segue em outra operação.
+        if operation.get("status") in ("FAILED", "CANCELLED"):
+            break
+        source = None
+        return dict(operation)
     if sidecar.get("needsRedownload"):
         raise ValueError("A cópia local antecede o envio persistido. Faça novo download antes de enviar outras edições.")
-    if any(op.get("submitted") and op.get("status") not in ("COMPLETED", "FAILED", "CANCELLED") for op in operations):
+    if has_pending_upload(sidecar):
         raise ValueError("Há um envio pendente com outro conteúdo. Recupere o recibo do envio anterior antes de fazer novo download.")
     operation = {**scope, "operationId": str(uuid.uuid4()), "protocolVersion": 2}
     path = archive_path(source_path, operation)

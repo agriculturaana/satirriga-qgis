@@ -129,9 +129,14 @@ def read_sidecar(gpkg_path_str: str) -> dict:
         return {}
 
 
+def pending_upload_operations(sidecar):
+    return [operation for operation in sidecar.get("uploadOperations", [])
+            if operation.get("submitted") and not operation.get("abandoned")
+            and operation.get("status") not in ("COMPLETED", "FAILED", "CANCELLED")]
+
+
 def has_pending_upload(sidecar):
-    return any(operation.get("submitted") and operation.get("status") not in ("COMPLETED", "FAILED", "CANCELLED")
-               for operation in sidecar.get("uploadOperations", []))
+    return bool(pending_upload_operations(sidecar))
 
 
 def detect_gpkg_version(gpkg_path_str: str) -> int:

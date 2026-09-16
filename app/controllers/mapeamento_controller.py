@@ -931,7 +931,8 @@ class MapeamentoController(QObject):
         de camadas.
         """
         from ...infra.tasks.download_task import DownloadZonalTask
-        from ...domain.services.gpkg_service import gpkg_path_for_zonal, gpkg_base_dir, read_sidecar, has_pending_upload
+        from ...domain.services.gpkg_service import gpkg_path_for_zonal, gpkg_base_dir, read_sidecar, pending_upload_operations
+        from ...domain.services.upload_package import operation_recoverable
         from ...domain.models.enums import DownloadOrigin
 
         if not self._state.is_authenticated or not self._token_provider:
@@ -952,8 +953,14 @@ class MapeamentoController(QObject):
         if self._has_active_gpkg_task(output_path):
             self._state.set_error(f"download:{zonal_id}", "Há uma operação em andamento para este GeoPackage.")
             return
-        if has_pending_upload(read_sidecar(output_path)):
-            self._state.set_error(f"download:{zonal_id}", "Há um envio pendente de confirmação. Retome o envio para recuperar o recibo antes de baixar novamente.")
+        pending = pending_upload_operations(read_sidecar(output_path))
+        if pending:
+            if any(operation_recoverable(output_path, operation) for operation in pending):
+                message = "Há um envio pendente de confirmação. Retome o envio para recuperar o recibo antes de baixar novamente."
+            else:
+                message = ("O envio pendente não pode ser retomado porque o pacote local foi removido ou alterado. "
+                           "Envie as edições novamente ou remova a cópia local na aba Camadas antes de baixar.")
+            self._state.set_error(f"download:{zonal_id}", message)
             return
 
         # Metadados do catalogo para enriquecer sidecar

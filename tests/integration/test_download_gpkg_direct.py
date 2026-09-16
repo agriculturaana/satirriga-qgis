@@ -135,6 +135,21 @@ def _load_download_module():
     return module
 
 
+@pytest.fixture
+def download_module():
+    """Carrega a task com QGIS simulado e devolve sys.modules ao estado anterior ao terminar."""
+    def isolated(name):
+        return name == "qgis" or name.startswith(("qgis.", "satirriga_qgis"))
+
+    previous = {name: module for name, module in sys.modules.items() if isolated(name)}
+    try:
+        yield _load_download_module()
+    finally:
+        for name in [name for name in sys.modules if isolated(name)]:
+            del sys.modules[name]
+        sys.modules.update(previous)
+
+
 def _create_server_gpkg(path, features):
     """Cria um GPKG como o servidor novo entrega: sem campos de sync locais."""
     drv = ogr.GetDriverByName("GPKG")
@@ -178,8 +193,8 @@ def _create_server_gpkg(path, features):
 
 
 class TestDownloadZonalTaskGpkg:
-    def test_downloads_gpkg_and_adds_sync_fields(self, temp_dir, monkeypatch):
-        module = _load_download_module()
+    def test_downloads_gpkg_and_adds_sync_fields(self, temp_dir, monkeypatch, download_module):
+        module = download_module
         gpkg_bytes = _create_server_gpkg(
             os.path.join(temp_dir, "server.gpkg"),
             SAMPLE_FEATURES[:2],
@@ -250,8 +265,8 @@ class TestDownloadZonalTaskGpkg:
         get_headers = get_mock.call_args.kwargs["headers"]
         assert get_headers["Accept"] == "application/geopackage+sqlite3"
 
-    def test_304_reuses_valid_cached_gpkg_and_updates_sidecar(self, temp_dir, monkeypatch):
-        module = _load_download_module()
+    def test_304_reuses_valid_cached_gpkg_and_updates_sidecar(self, temp_dir, monkeypatch, download_module):
+        module = download_module
         cached_path = os.path.join(temp_dir, "zonal_42", "zonal_42.gpkg")
         os.makedirs(os.path.dirname(cached_path), exist_ok=True)
         _create_server_gpkg(cached_path, SAMPLE_FEATURES[:1])
