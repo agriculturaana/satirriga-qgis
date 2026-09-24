@@ -307,6 +307,9 @@ class MapeamentoController(QObject):
         """Retorna True se o zonal está sendo monitorado."""
         return zonal_id in self._polling_zonals
 
+    def is_finalizing_zonal(self):
+        return self._pending_finalizar_zonal_request_id is not None
+
     def is_resumable(self, zonal_id):
         """Retorna True se o servidor aceita retomar o cálculo sem conclusão do zonal."""
         return zonal_id in self._resumable_zonals
@@ -349,6 +352,15 @@ class MapeamentoController(QObject):
         """Finaliza zonal (POST /api/zonal/:id/finalizar) para enviar à homologação."""
         if not self._state.is_authenticated:
             self._state.set_error("finalizar_zonal", "Nao autenticado")
+            return
+        # Há um único slot de requisição pendente: um segundo envio sobrescreveria o id do
+        # primeiro, cuja resposta de sucesso seria descartada, restando só a recusa do reenvio.
+        if self.is_finalizing_zonal():
+            QgsMessageLog.logMessage(
+                f"[Finalizar] Zonal {zonal_id} ignorado: encerramento do zonal "
+                f"{self._pending_finalizar_zonal_id} em andamento",
+                PLUGIN_NAME, Qgis.Info,
+            )
             return
 
         url = self._api_url(f"/zonal/{zonal_id}/finalizar")

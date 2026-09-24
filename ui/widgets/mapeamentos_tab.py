@@ -394,6 +394,7 @@ class MapeamentosTab(QWidget):
             )
             btn_encerrar.setIconSize(QSize(14, 14))
             btn_encerrar.setToolTip("Enviar para homologação")
+            btn_encerrar.setEnabled(not self._controller.is_finalizing_zonal())
             btn_encerrar.setStyleSheet(
                 "QPushButton { background-color: #2E7D32; color: white;"
                 " border: none; padding: 3px 12px; border-radius: 3px; font-size: 11px; }"
@@ -906,6 +907,9 @@ class MapeamentosTab(QWidget):
                     widget._download_btn.setEnabled(not is_loading)
                     widget._download_btn.setText("Baixando..." if is_loading else "Baixar")
                     break
+        elif operation == "finalizar_zonal":
+            for button in self._encerrar_buttons.values():
+                button.setEnabled(not is_loading)
         elif operation == "catalogo":
             self._refresh_btn.setEnabled(not is_loading)
             if is_loading:

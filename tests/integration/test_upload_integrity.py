@@ -711,3 +711,51 @@ def test_nova_operacao_recusada_pela_base_ja_consumida_libera_o_download(source,
     assert "versão-base" in str(retry._exception)
     assert gpkg.has_pending_upload(gpkg.read_sidecar(source)) is False
     assert _download_request(source, monkeypatch)[0] is True
+
+
+def test_finalizacao_repetida_nao_envia_segunda_requisicao_enquanto_a_primeira_esta_pendente():
+    state, http, config = MagicMock(), MagicMock(), MagicMock()
+    config.get.return_value = "http://sat/api"
+    http.post_json.side_effect = ["req-1", "req-2"]
+    controller = controller_module.MapeamentoController(state, http, config, token_provider=lambda: "token")
+    controller.finalizar_zonal(42)
+    controller.finalizar_zonal(42)
+    assert http.post_json.call_count == 1
+    assert controller.is_finalizing_zonal() is True
+    controller._on_request_finished("req-1", 200, json.dumps({"id": 42, "status": "AGUARDANDO"}))
+    state.zonal_finalizado.emit.assert_called_once_with(42, "AGUARDANDO")
+    state.set_error.assert_not_called()
+    assert controller.is_finalizing_zonal() is False
+    controller.finalizar_zonal(42)
+    assert http.post_json.call_count == 2
+
+
+def test_falha_da_finalizacao_libera_novo_envio():
+    state, http, config = MagicMock(), MagicMock(), MagicMock()
+    config.get.return_value = "http://sat/api"
+    http.post_json.side_effect = ["req-1", "req-2"]
+    controller = controller_module.MapeamentoController(state, http, config, token_provider=lambda: "token")
+    controller.finalizar_zonal(42)
+    controller._on_request_error("req-1", "timeout")
+    controller.finalizar_zonal(42)
+    assert http.post_json.call_count == 2
+
+
+@pytest.mark.parametrize("finalizing", [True, False])
+def test_botao_encerrar_fica_desabilitado_durante_a_finalizacao(finalizing, tmp_path):
+    from qgis.PyQt.QtWidgets import QPushButton
+
+    state = MagicMock()
+    state.is_authenticated = False
+    controller = MagicMock()
+    controller.get_gpkg_base_dir.return_value = str(tmp_path)
+    controller.is_polling.return_value = False
+    controller.is_finalizing_zonal.return_value = finalizing
+    tab = tab_module.MapeamentosTab(state, controller)
+    card = tab._create_card(zonal_models.CatalogoItem(id=42, descricao="Zonal", status="CONSOLIDATED", mapeamento_id=7))
+    button = next(button for button in card.findChildren(QPushButton) if button.text() == "Encerrar")
+    assert button.isEnabled() is not finalizing
+    tab._on_loading_changed("finalizar_zonal", True)
+    assert button.isEnabled() is False
+    tab._on_loading_changed("finalizar_zonal", False)
+    assert button.isEnabled() is True
