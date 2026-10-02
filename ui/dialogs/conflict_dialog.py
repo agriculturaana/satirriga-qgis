@@ -23,7 +23,7 @@ from ...domain.models.enums import ConflictResolutionEnum
 class ConflictResolutionDialog(QDialog):
     """Dialog para resolucao de conflitos detectados durante upload."""
 
-    resolved = pyqtSignal(list)  # lista de {"featureHash": str, "resolution": str}
+    resolved = pyqtSignal(list)  # lista de {"featureId": int, "resolution": str}
 
     def __init__(self, conflict_set: ConflictSet, parent=None):
         super().__init__(parent)
@@ -61,7 +61,7 @@ class ConflictResolutionDialog(QDialog):
         self._table = QTableWidget()
         self._table.setColumnCount(4)
         self._table.setHorizontalHeaderLabels([
-            "Feature Hash", "Tipo", "Sugerido", "Decisão"
+            "Feição", "Tipo", "Sugerido", "Decisão"
         ])
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -76,10 +76,10 @@ class ConflictResolutionDialog(QDialog):
         self._combos = []
 
         for i, item in enumerate(self._conflict_set.items):
-            # Feature hash (truncado)
-            hash_text = item.feature_hash[:12] + "..." if len(item.feature_hash) > 12 else item.feature_hash
-            self._table.setItem(i, 0, QTableWidgetItem(hash_text))
-            self._table.item(i, 0).setToolTip(item.feature_hash)
+            feature = QTableWidgetItem("" if item.original_fid is None else str(item.original_fid))
+            if item.feature_id is not None:
+                feature.setToolTip(f"Registro {item.feature_id} do lote enviado")
+            self._table.setItem(i, 0, feature)
 
             # Tipo de conflito
             self._table.setItem(i, 1, QTableWidgetItem(item.conflict_type))
@@ -184,7 +184,7 @@ class ConflictResolutionDialog(QDialog):
             combo = self._combos[i]
             resolution = combo.currentData()
             resolutions.append({
-                "featureHash": item.feature_hash,
+                "featureId": item.feature_id,
                 "resolution": resolution,
             })
 

@@ -6,7 +6,8 @@ from typing import Optional, List
 
 @dataclass
 class ConflictItem:
-    feature_hash: str
+    feature_id: Optional[int]       # registro da feição no lote enviado
+    original_fid: Optional[int]     # feição de origem no servidor, o ID que o técnico vê na camada
     conflict_type: str
     mine: Optional[dict] = None
     theirs: Optional[dict] = None
@@ -15,8 +16,9 @@ class ConflictItem:
     @classmethod
     def from_dict(cls, data: dict) -> "ConflictItem":
         return cls(
-            feature_hash=data.get("featureHash", ""),
-            conflict_type=data.get("conflictType", ""),
+            feature_id=data.get("featureId"),
+            original_fid=data.get("originalFid"),
+            conflict_type=data.get("type", ""),
             mine=data.get("mine"),
             theirs=data.get("theirs"),
             suggested=data.get("suggested"),
