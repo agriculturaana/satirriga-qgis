@@ -1,5 +1,20 @@
+import configparser
+import os
+
 PLUGIN_NAME = "SatIrriga"
-PLUGIN_VERSION = "3.1.0"
+
+
+def _published_version():
+    # A versão vem do metadata.txt, o mesmo arquivo que o QGIS exige para carregar o plugin e que o release
+    # atualiza; uma cópia no código fica defasada a cada versão publicada.
+    metadata = configparser.ConfigParser(interpolation=None)
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "metadata.txt")
+    with open(path, encoding="utf-8") as stream:
+        metadata.read_file(stream)
+    return metadata.get("general", "version")
+
+
+PLUGIN_VERSION = _published_version()
 
 DEFAULTS = {
     "api_base_url": "https://satirriga.snirh.gov.br/api",
