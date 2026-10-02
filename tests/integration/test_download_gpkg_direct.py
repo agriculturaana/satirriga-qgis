@@ -63,6 +63,17 @@ class _QgsMessageLog:
 class _Qgis:
     Info = 0
     Warning = 1
+    Critical = 2
+
+
+class _QgsSettings:
+    """Configurações vazias: o nível de registro e as demais opções assumem os valores padrão do plugin."""
+
+    def value(self, key, default=None):
+        return default
+
+    def setValue(self, key, value):
+        pass
 
 
 class _Response:
@@ -95,6 +106,7 @@ def _install_qgis_mocks():
     qtcore.pyqtSignal = _Signal
     core.QgsTask = _QgsTask
     core.QgsMessageLog = _QgsMessageLog
+    core.QgsSettings = _QgsSettings
     core.Qgis = _Qgis
     core.QgsApplication = MagicMock()
 

@@ -349,24 +349,28 @@ class TestUploadBatchStatus:
 
 
 class TestConflictItem:
+    # Itens no formato que o detector de conflitos do servidor grava e a rota de conflitos devolve.
     def test_from_dict(self):
         data = {
-            "featureHash": "abc123hash",
-            "conflictType": "GEOMETRY_CHANGED",
-            "mine": {"type": "Feature", "geometry": {"type": "Polygon"}},
-            "theirs": {"type": "Feature", "geometry": {"type": "Polygon"}},
+            "featureId": 501,
+            "originalFid": 72251,
+            "type": "GEOMETRY_DIVERGENCE",
+            "mine": {"type": "Polygon", "coordinates": []},
+            "theirs": {"type": "Polygon", "coordinates": []},
             "suggested": "TAKE_MINE",
         }
         item = ConflictItem.from_dict(data)
-        assert item.feature_hash == "abc123hash"
-        assert item.conflict_type == "GEOMETRY_CHANGED"
+        assert item.feature_id == 501
+        assert item.original_fid == 72251
+        assert item.conflict_type == "GEOMETRY_DIVERGENCE"
         assert item.mine is not None
         assert item.theirs is not None
         assert item.suggested == "TAKE_MINE"
 
     def test_from_dict_minimal(self):
         item = ConflictItem.from_dict({})
-        assert item.feature_hash == ""
+        assert item.feature_id is None
+        assert item.original_fid is None
         assert item.conflict_type == ""
         assert item.mine is None
         assert item.theirs is None
@@ -376,31 +380,34 @@ class TestConflictItem:
 class TestConflictSet:
     def test_from_dict_full(self):
         data = {
-            "conflictId": 99,
+            "conflictId": "0d4c7d0e-8f7a-4f53-9c2e-6b1f4a2d9e11",
             "baseVersion": 3,
             "currentVersion": 5,
             "items": [
                 {
-                    "featureHash": "hash1",
-                    "conflictType": "GEOMETRY_CHANGED",
-                    "suggested": "TAKE_THEIRS",
+                    "featureId": 11,
+                    "originalFid": 901,
+                    "type": "GEOMETRY_DIVERGENCE",
+                    "suggested": "TAKE_MINE",
                 },
                 {
-                    "featureHash": "hash2",
-                    "conflictType": "ATTRIBUTE_CHANGED",
+                    "featureId": 12,
+                    "originalFid": 902,
+                    "type": "GEOMETRY_DIVERGENCE",
                 },
             ],
+            "autoResolutions": None,
             "expiresAt": "2024-06-15T13:00:00Z",
             "status": "PENDING",
         }
         cs = ConflictSet.from_dict(data)
-        assert cs.conflict_id == 99
+        assert cs.conflict_id == "0d4c7d0e-8f7a-4f53-9c2e-6b1f4a2d9e11"
         assert cs.base_version == 3
         assert cs.current_version == 5
         assert len(cs.items) == 2
-        assert cs.items[0].feature_hash == "hash1"
-        assert cs.items[0].suggested == "TAKE_THEIRS"
-        assert cs.items[1].feature_hash == "hash2"
+        assert (cs.items[0].feature_id, cs.items[0].original_fid) == (11, 901)
+        assert cs.items[0].suggested == "TAKE_MINE"
+        assert (cs.items[1].feature_id, cs.items[1].original_fid) == (12, 902)
         assert cs.items[1].suggested is None
         assert cs.expires_at == "2024-06-15T13:00:00Z"
         assert cs.status == "PENDING"

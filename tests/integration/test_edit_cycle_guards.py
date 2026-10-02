@@ -28,6 +28,8 @@ try:
     controller_module = importlib.import_module(f"{_PACKAGE}.app.controllers.mapeamento_controller")
     widget_module = importlib.import_module(f"{_PACKAGE}.ui.widgets.upload_progress_widget")
     dialog_module = importlib.import_module(f"{_PACKAGE}.ui.dialogs.attribute_dialog")
+    conflict_dialog_module = importlib.import_module(f"{_PACKAGE}.ui.dialogs.conflict_dialog")
+    conflict_model = importlib.import_module(f"{_PACKAGE}.domain.models.conflict")
     _REAL_QGIS = {name: module for name, module in sys.modules.items() if name == "qgis" or name.startswith("qgis.")}
 finally:
     for name in list(sys.modules):
@@ -230,3 +232,18 @@ def test_painel_mostra_falha_do_lote_mesmo_com_zonal_concluida():
     })
     assert widget._status_label.text() == "Recálculo com falha"
     assert "Cálculo do lote interrompido" in widget._detail_label.text()
+
+
+def test_dialogo_de_conflitos_identifica_a_feicao_e_o_tipo_informados_pelo_servidor():
+    conflict_set = conflict_model.ConflictSet.from_dict({
+        "conflictId": "0d4c7d0e-8f7a-4f53-9c2e-6b1f4a2d9e11", "baseVersion": 1, "currentVersion": 2,
+        "items": [{"featureId": 501, "originalFid": 72251, "type": "GEOMETRY_DIVERGENCE", "suggested": "TAKE_MINE"}],
+        "expiresAt": "2026-10-03T01:40:01.886Z", "status": "PENDING",
+    })
+    dialog = conflict_dialog_module.ConflictResolutionDialog(conflict_set)
+    decisions = []
+    dialog.resolved.connect(decisions.append)
+    assert dialog._table.item(0, 0).text() == "72251"
+    assert dialog._table.item(0, 1).text() == "GEOMETRY_DIVERGENCE"
+    dialog._apply_resolutions()
+    assert decisions == [[{"featureId": 501, "resolution": "TAKE_MINE"}]]

@@ -1,5 +1,8 @@
 """Testes unitarios para ConfigRepository."""
 
+import configparser
+import os
+
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -27,7 +30,7 @@ with patch.dict("sys.modules", {
     sys.modules["qgis.core"].QgsSettings = FakeQgsSettings
 
     from infra.config.repository import ConfigRepository
-    from infra.config.settings import DEFAULTS, SETTINGS_NAMESPACE
+    from infra.config.settings import DEFAULTS, PLUGIN_VERSION, SETTINGS_NAMESPACE
 
 
 class TestConfigRepository:
@@ -89,3 +92,13 @@ class TestConfigRepository:
         """Chaves devem ser prefixadas com SETTINGS_NAMESPACE."""
         key = self.repo._key("api_base_url")
         assert key == f"{SETTINGS_NAMESPACE}/api_base_url"
+
+
+class TestPluginVersion:
+    def test_version_matches_metadata(self):
+        """A versão exibida no painel é a publicada no repositório de complementos."""
+        metadata = configparser.ConfigParser(interpolation=None)
+        raiz = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        with open(os.path.join(raiz, "metadata.txt"), encoding="utf-8") as arquivo:
+            metadata.read_file(arquivo)
+        assert PLUGIN_VERSION == metadata.get("general", "version")
