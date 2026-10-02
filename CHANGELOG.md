@@ -5,6 +5,36 @@ Todas as mudancas notaveis do SatIrriga QGIS Plugin serao documentadas neste arq
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
 e o versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
+## [3.2.0] - 2026-10-02
+
+Requer o servidor SatIrriga com o envio identificado por operação, o envelope de erros `{code, message}` e o novo formato de conflitos.
+
+### Adicionado
+
+- **Envio protegido contra perda e duplicidade:** cada envio recebe identificação própria e o pacote é gravado em disco antes da transmissão; se a conexão cair, o plugin recupera o recibo do envio já recebido pelo servidor em vez de enviar de novo
+- **Retomada de zonal travada:** no catálogo, a zonal cujo cálculo está sem conclusão há mais de duas horas passa a oferecer o botão Reprocessar
+- **Motivo das recusas do servidor:** recusas por regra de negócio (4xx) exibem a explicação enviada pelo servidor; sessão expirada mantém a orientação de novo login e falhas internas (5xx) seguem sem detalhes técnicos
+- **Configurações com efeito real:** itens por página, intervalo de consulta da situação das zonais (aplicado sem reiniciar) e nível de log passam a ser respeitados
+
+### Alterado
+
+- Intervalo padrão de consulta da situação das zonais reduzido de 3 s para 1 s
+- Campos calculados pelo servidor ficam somente leitura; atributos de outorga e localização seguem editáveis
+- Versão exibida no painel lida do `metadata.txt`, sem cópia no código
+
+### Corrigido
+
+- Diálogo de conflitos lia campos inexistentes: identificação da feição e tipo ficavam vazios e as decisões eram enviadas sem a feição correspondente
+- Segundo clique em Encerrar durante o envio gerava pedido duplicado e exibia erro embora a zonal já tivesse sido encaminhada
+- Ciclo entre envio e download quando o pacote de um envio sem confirmação era removido ou alterado
+- Edição em massa recusada em camada bloqueada ou pendente de novo download; feições criadas no QGIS deixam de se perder no acompanhamento das alterações
+- Marca de novo download obrigatório respeitada, versão e resumo do conteúdo lidos da resposta do servidor e histórico de operações preservado no arquivo local
+- Metadados locais ilegíveis deixam de ser sobrescritos e passam a pedir novo download
+
+### Removido
+
+- Script `plugin_upload.py`, sem uso e não funcional
+
 ## [3.1.2] - 2026-09-09
 
 ### Adicionado
@@ -17,6 +47,19 @@ e o versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 ### Corrigido
 
 - Monitoramento pós-upload passa a esperar até 30 minutos e, ao expirar, entrega o acompanhamento ao polling da lista em vez de encerrar como concluído
+
+## [3.1.1] - 2026-08-24
+
+### Adicionado
+
+- **Δ NDVI na inspeção de pixel:** variação do NDVI entre a imagem atual e a anterior nos métodos de detecção de mudança 2a e 2b, com cores de perda, estabilidade ou ganho; cenas que não cobrem o ponto clicado são sinalizadas
+- **Imagens da classificação:** o diálogo de detalhes da geometria zonal mostra tile, imagem utilizada e datas efetivas das imagens de satélite
+
+### Corrigido
+
+- Card do mapeamento permanece visível com indicador Processando durante o recálculo, com Encerrar, Baixar e Enviar desabilitados até a conclusão
+- Resposta de bloqueio do servidor (409) exibida com mensagem explicativa em vez de erro genérico
+- Camadas, grupos e mensagens passam a usar o número do mapeamento em vez do identificador interno da zonal
 
 ## [3.1.0] - 2026-05-12
 
