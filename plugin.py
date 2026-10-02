@@ -4,10 +4,11 @@ import traceback
 from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtGui import QColor, QIcon
 from qgis.PyQt.QtWidgets import QAction
-from qgis.core import QgsMessageLog, Qgis
+from qgis.core import Qgis
 
 from . import resources  # noqa: F401 — registra icone no Qt Resource System
 from .infra.config.settings import PLUGIN_NAME
+from .infra.message_log import log_message
 
 
 class SatIrrigaPlugin:
@@ -121,7 +122,7 @@ class SatIrrigaPlugin:
         return QCoreApplication.translate("SatIrrigaPlugin", message)
 
     def _log(self, message, level=Qgis.Info):
-        QgsMessageLog.logMessage(message, PLUGIN_NAME, level)
+        log_message(message, PLUGIN_NAME, level)
 
     def add_action(self, icon_path, text, callback, enabled_flag=True,
                    add_to_menu=True, add_to_toolbar=True,

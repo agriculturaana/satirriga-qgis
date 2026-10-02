@@ -12,12 +12,12 @@ from qgis.core import (
     Qgis,
     QgsLayerTreeGroup,
     QgsLayerTreeLayer,
-    QgsMessageLog,
     QgsProject,
 )
 
 from ...domain.services.tile_indexes_service import TileIndexesService
 from ...infra.config.settings import PLUGIN_NAME
+from ...infra.message_log import log_message
 from ...ui.tools.pixel_inspect_map_tool import PixelInspectMapTool
 
 
@@ -105,7 +105,7 @@ class PixelInspectController(QObject):
             image_ids, lat, lon, image_ids2
         )
 
-        QgsMessageLog.logMessage(
+        log_message(
             f"[PixelInspect] POST indices: lat={lat} lon={lon} "
             f"({len(image_ids)} cena(s))",
             PLUGIN_NAME, Qgis.Info,
@@ -133,7 +133,7 @@ class PixelInspectController(QObject):
         self._pending_coords = None
         self._pending_image_ids = []
         self._pending_image_ids2 = []
-        QgsMessageLog.logMessage(
+        log_message(
             f"[PixelInspect] Erro: {error_msg}",
             PLUGIN_NAME, Qgis.Warning,
         )

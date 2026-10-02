@@ -5,9 +5,10 @@ import os
 from urllib.parse import quote
 
 from qgis.PyQt.QtCore import QObject, QTimer, pyqtSignal
-from qgis.core import QgsApplication, QgsVectorLayer, QgsMessageLog, QgsProject, Qgis
+from qgis.core import QgsApplication, QgsVectorLayer, QgsProject, Qgis
 
 from ...infra.config.settings import PLUGIN_NAME
+from ...infra.message_log import log_message
 from ...infra.http.client import HttpClient
 from ...app.state.store import AppState
 
@@ -72,7 +73,6 @@ class MapeamentoController(QObject):
         self._polling_zonals = {}        # zonal_id -> {"request_id": None, "errors": 0}
         self._resumable_zonals = set()   # zonais com cálculo sem conclusão que o servidor aceita retomar
         self._poll_timer = QTimer(self)
-        self._poll_timer.setInterval(1000)
         self._poll_timer.timeout.connect(self._poll_active_zonals)
         self._pending_overlay_ids = {}   # request_id -> zonal_id
         self._pending_versions_ids = {}   # request_id -> zonal_id
@@ -90,10 +90,21 @@ class MapeamentoController(QObject):
         # Conecta signals do HttpClient
         self._http.request_finished.connect(self._on_request_finished)
         self._http.request_error.connect(self._on_request_error)
+        self._state.config_changed.connect(self._on_config_changed)
 
     def _api_url(self, path):
         base = self._config.get("api_base_url").rstrip("/")
         return f"{base}{path}"
+
+    def _page_size(self):
+        return int(self._config.get("page_size"))
+
+    def _polling_interval_ms(self):
+        return int(self._config.get("polling_interval_ms"))
+
+    def _on_config_changed(self, changed_keys):
+        if "polling_interval_ms" in changed_keys:
+            self._poll_timer.setInterval(self._polling_interval_ms())
 
     def get_gpkg_base_dir(self):
         """Retorna diretorio base para GPKGs, respeitando configuracao."""
@@ -104,14 +115,14 @@ class MapeamentoController(QObject):
     # Catalogo Zonal (V2)
     # ----------------------------------------------------------------
 
-    def load_catalogo(self, page=1, size=20, status="CONSOLIDATED", metodo="",
+    def load_catalogo(self, page=1, size=None, status="CONSOLIDATED", metodo="",
                       mapeamento_id="", author="", descricao="",
                       sort="", direction="", only_mine=False):
         """Carrega catalogo de zonais com paginação, filtros e ordenação server-side."""
         if not self._state.is_authenticated:
             return
 
-        params = f"status={status}&page={page}&size={size}"
+        params = f"status={status}&page={page}&size={size or self._page_size()}"
         if only_mine:
             params += "&onlyMine=true"
         if mapeamento_id:
@@ -158,12 +169,13 @@ class MapeamentoController(QObject):
 
     def load_catalogo_homologacao(self, status_filter="AGUARDANDO",
                                   mapeamento_id="", author="", descricao="",
-                                  page=1, size=20,
+                                  page=1, size=None,
                                   sort="processedAt", direction="desc"):
         """Carrega catalogo de zonais para homologação com filtros e paginação."""
         if not self._state.is_authenticated:
             return
 
+        size = size or self._page_size()
         params = f"status={status_filter}&page={page}&size={size}&sort={sort}&direction={direction}"
         if mapeamento_id:
             params += f"&mapeamentoId={quote(mapeamento_id)}"
@@ -175,12 +187,12 @@ class MapeamentoController(QObject):
         self._state.set_loading("catalogo_homologacao", True)
         self._pending_catalogo_homologacao_id = self._http.get(url)
 
-    def load_upload_history(self, page=1, size=20, status="", mapeamento_id=""):
+    def load_upload_history(self, page=1, size=None, status="", mapeamento_id=""):
         """Carrega histórico de uploads com paginação server-side."""
         if not self._state.is_authenticated:
             return
 
-        params = f"page={page}&size={size}"
+        params = f"page={page}&size={size or self._page_size()}"
         if status:
             params += f"&status={quote(status)}"
         if mapeamento_id:
@@ -291,7 +303,7 @@ class MapeamentoController(QObject):
         if zonal_id not in self._polling_zonals:
             self._polling_zonals[zonal_id] = {"request_id": None, "errors": 0}
         if not self._poll_timer.isActive():
-            self._poll_timer.start()
+            self._poll_timer.start(self._polling_interval_ms())
 
     def stop_polling_zonal(self, zonal_id):
         """Para polling de um zonal específico."""
@@ -320,7 +332,7 @@ class MapeamentoController(QObject):
             return
         self._resumable_zonals.add(zonal_id)
         self.stop_polling_zonal(zonal_id)
-        QgsMessageLog.logMessage(
+        log_message(
             f"[Poll] Zonal {zonal_id} sem conclusão desde {data.get('processingSince')}; retomada disponível",
             PLUGIN_NAME, Qgis.Warning,
         )
@@ -356,7 +368,7 @@ class MapeamentoController(QObject):
         # Há um único slot de requisição pendente: um segundo envio sobrescreveria o id do
         # primeiro, cuja resposta de sucesso seria descartada, restando só a recusa do reenvio.
         if self.is_finalizing_zonal():
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[Finalizar] Zonal {zonal_id} ignorado: encerramento do zonal "
                 f"{self._pending_finalizar_zonal_id} em andamento",
                 PLUGIN_NAME, Qgis.Info,
@@ -416,7 +428,7 @@ class MapeamentoController(QObject):
         self._pending_renew_id = self._http.post_json(url, payload)
         self._pending_renew_zonal_id = zonal_id
         self._pending_renew_gpkg_path = gpkg_path
-        QgsMessageLog.logMessage(
+        log_message(
             f"Renovando editToken para zonal #{zonal_id}",
             PLUGIN_NAME, Qgis.Info,
         )
@@ -473,13 +485,13 @@ class MapeamentoController(QObject):
                     pagination = data.get("pagination") or {}
                 items = [CatalogoItem.from_dict(item) for item in items_raw]
                 self._state.catalogo_items = (items, pagination)
-                QgsMessageLog.logMessage(
+                log_message(
                     f"[Catalogo] {len(items)} zonais carregados"
                     f" (pag {pagination.get('page', '?')}/{pagination.get('totalPages', '?')})",
                     PLUGIN_NAME, Qgis.Info,
                 )
             except Exception as e:
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Erro ao parsear catalogo: {e}\nBody: {body[:500]}",
                     PLUGIN_NAME, Qgis.Warning,
                 )
@@ -499,13 +511,13 @@ class MapeamentoController(QObject):
                     pagination = data.get("pagination") or {}
                 items = [CatalogoItem.from_dict(item) for item in items_raw]
                 self._state.catalogo_homologacao_changed.emit(items, pagination)
-                QgsMessageLog.logMessage(
+                log_message(
                     f"[Homologacao] {len(items)} zonais carregados"
                     f" (pag {pagination.get('page', '?')}/{pagination.get('totalPages', '?')})",
                     PLUGIN_NAME, Qgis.Info,
                 )
             except Exception as e:
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Erro ao parsear catalogo homologacao: {e}",
                     PLUGIN_NAME, Qgis.Warning,
                 )
@@ -517,7 +529,7 @@ class MapeamentoController(QObject):
             try:
                 data = json.loads(body)
                 self._state.parecer_emitido.emit(data)
-                QgsMessageLog.logMessage(
+                log_message(
                     f"[Parecer] Emitido: {data}",
                     PLUGIN_NAME, Qgis.Info,
                 )
@@ -540,7 +552,7 @@ class MapeamentoController(QObject):
                 if isinstance(data, list) and data:
                     sample = data[0]
                     keys = sorted(sample.keys()) if isinstance(sample, dict) else "N/A"
-                    QgsMessageLog.logMessage(
+                    log_message(
                         f"[Raster] tilesMetodos: {len(data)} tiles, "
                         f"metodo={metodo}, keys={keys}",
                         PLUGIN_NAME, Qgis.Info,
@@ -553,12 +565,12 @@ class MapeamentoController(QObject):
                     for dg in hierarchy.dates
                     for bg in dg.bands
                 )
-                QgsMessageLog.logMessage(
+                log_message(
                     f"[Raster] {total} camadas em {len(hierarchy.dates)} datas",
                     PLUGIN_NAME, Qgis.Info,
                 )
             except Exception as e:
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Erro ao parsear tiles raster: {e}",
                     PLUGIN_NAME, Qgis.Warning,
                 )
@@ -573,7 +585,7 @@ class MapeamentoController(QObject):
             self._pending_conflict_resolve_id = None
             batch_uuid = self._pending_conflict_resolve_uuid
             self._pending_conflict_resolve_uuid = None
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[Conflict] Resolucoes enviadas para batch {batch_uuid}",
                 PLUGIN_NAME, Qgis.Info,
             )
@@ -589,12 +601,12 @@ class MapeamentoController(QObject):
                 pagination = data.get("pagination") or {}
                 items = [UploadHistoryItem.from_dict(item) for item in items_raw]
                 self._state.upload_history_changed.emit(items, pagination)
-                QgsMessageLog.logMessage(
+                log_message(
                     f"[UploadHistory] {len(items)} batches carregados",
                     PLUGIN_NAME, Qgis.Info,
                 )
             except Exception as e:
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Erro ao parsear historico de uploads: {e}",
                     PLUGIN_NAME, Qgis.Warning,
                 )
@@ -606,7 +618,7 @@ class MapeamentoController(QObject):
             try:
                 data = json.loads(body)
                 self._state.mapeamento_suprimido.emit(data)
-                QgsMessageLog.logMessage(
+                log_message(
                     f"[Suprimir] Mapeamento suprimido: {data}",
                     PLUGIN_NAME, Qgis.Info,
                 )
@@ -624,7 +636,7 @@ class MapeamentoController(QObject):
                     self._state.mapeamento_encerrado.emit(
                         {"mapeamentoId": mid, "message": msg}
                     )
-                    QgsMessageLog.logMessage(
+                    log_message(
                         f"[Encerrar] Mapeamento #{mid} encerrado: {msg}",
                         PLUGIN_NAME, Qgis.Info,
                     )
@@ -646,7 +658,7 @@ class MapeamentoController(QObject):
                     self._resumable_zonals.discard(zid)
                     self.start_polling_zonal(zid)
                     self._state.reprocess_overlay_done.emit(zid, msg)
-                    QgsMessageLog.logMessage(
+                    log_message(
                         f"[Reprocess] Overlay zonal {zid}: {msg} (polling iniciado)",
                         PLUGIN_NAME, Qgis.Info,
                     )
@@ -670,7 +682,7 @@ class MapeamentoController(QObject):
                 if status_code < 300:
                     new_status = data.get("status", "AGUARDANDO")
                     self._state.zonal_finalizado.emit(zid, new_status)
-                    QgsMessageLog.logMessage(
+                    log_message(
                         f"[Finalizar] Zonal {zid} → {new_status}",
                         PLUGIN_NAME, Qgis.Info,
                     )
@@ -688,7 +700,7 @@ class MapeamentoController(QObject):
                 if zonal_status:
                     self._state.zonal_status_polled.emit(zid, zonal_status)
             except Exception as e:
-                QgsMessageLog.logMessage(
+                log_message(
                     f"[Status] Erro ao parsear status one-shot do zonal {zid}: {e}",
                     PLUGIN_NAME, Qgis.Warning,
                 )
@@ -707,12 +719,12 @@ class MapeamentoController(QObject):
                 _intermediate = {"PROCESSING", "OVERLAID", "CREATED", "CONSOLIDATING"}
                 if zonal_status not in _intermediate:
                     self.stop_polling_zonal(zid)
-                    QgsMessageLog.logMessage(
+                    log_message(
                         f"[Poll] Zonal {zid} finalizou reprocessamento: {zonal_status}",
                         PLUGIN_NAME, Qgis.Info,
                     )
             except Exception as e:
-                QgsMessageLog.logMessage(
+                log_message(
                     f"[Poll] Erro ao parsear status do zonal {zid}: {e}",
                     PLUGIN_NAME, Qgis.Warning,
                 )
@@ -731,12 +743,12 @@ class MapeamentoController(QObject):
                 new_expires = data.get("expiresAt")
                 if new_expires and zonal_id and gpkg:
                     update_sidecar(gpkg, lambda sidecar: sidecar.update({"expiresAt": new_expires}))
-                    QgsMessageLog.logMessage(
+                    log_message(
                         f"editToken renovado para zonal #{zonal_id} até {new_expires}",
                         PLUGIN_NAME, Qgis.Info,
                     )
             except Exception as e:
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Erro ao atualizar sidecar após renovação: {e}",
                     PLUGIN_NAME, Qgis.Warning,
                 )
@@ -747,7 +759,7 @@ class MapeamentoController(QObject):
                 data = json.loads(body)
                 self.versions_loaded.emit(zonal_id, data)
             except Exception as e:
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Erro ao parsear versoes: {e}",
                     PLUGIN_NAME, Qgis.Warning,
                 )
@@ -765,7 +777,7 @@ class MapeamentoController(QObject):
                 data = json.loads(body)
                 # A API pode retornar {data: {geomId: {...}}} ou diretamente {geomId: {...}}
                 overlay = data.get("data", data) if isinstance(data, dict) else {}
-                QgsMessageLog.logMessage(
+                log_message(
                     f"[Overlay] zonal {zonal_id}: {len(overlay)} chaves, "
                     f"keys_sample={list(overlay.keys())[:5]}",
                     PLUGIN_NAME, Qgis.Info,
@@ -773,7 +785,7 @@ class MapeamentoController(QObject):
                 self.overlay_data_ready.emit(zonal_id, overlay)
             except Exception as e:
                 body_preview = body[:300].decode("utf-8", errors="replace") if body else "(vazio)"
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Erro ao parsear overlay data para zonal {zonal_id}: {e}\n"
                     f"Body preview: {body_preview}",
                     PLUGIN_NAME, Qgis.Warning,
@@ -787,12 +799,12 @@ class MapeamentoController(QObject):
                 mapeamento = Mapeamento.from_dict(data)
                 if mapeamento.geom:
                     self._state.mascara_layer_ready.emit(mapeamento_id, mapeamento.geom)
-                    QgsMessageLog.logMessage(
+                    log_message(
                         f"[Mascara] Geometria carregada para mapeamento #{mapeamento_id}",
                         PLUGIN_NAME, Qgis.Info,
                     )
             except Exception as e:
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Erro ao parsear mascara do mapeamento #{mapeamento_id}: {e}",
                     PLUGIN_NAME, Qgis.Warning,
                 )
@@ -803,12 +815,12 @@ class MapeamentoController(QObject):
                 data = json.loads(body)
                 items = data.get("data") or []
                 self.notifications_loaded.emit(items)
-                QgsMessageLog.logMessage(
+                log_message(
                     f"[Notificacoes] {len(items)} notificação(ões) carregada(s)",
                     PLUGIN_NAME, Qgis.Info,
                 )
             except Exception as e:
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Erro ao parsear notificacoes: {e}",
                     PLUGIN_NAME, Qgis.Warning,
                 )
@@ -821,12 +833,12 @@ class MapeamentoController(QObject):
                 data = json.loads(body)
                 items = data.get("data") or data if isinstance(data, list) else []
                 self.pareceres_loaded.emit(mid, items)
-                QgsMessageLog.logMessage(
+                log_message(
                     f"[Pareceres] {len(items)} parecer(es) para mapeamento #{mid}",
                     PLUGIN_NAME, Qgis.Info,
                 )
             except Exception as e:
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Erro ao parsear pareceres: {e}",
                     PLUGIN_NAME, Qgis.Warning,
                 )
@@ -846,7 +858,7 @@ class MapeamentoController(QObject):
             self._state.set_error("parecer", error_msg)
         elif request_id == self._pending_raster_id:
             self._pending_raster_id = None
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Erro ao carregar tiles raster: {error_msg}",
                 PLUGIN_NAME, Qgis.Warning,
             )
@@ -878,7 +890,7 @@ class MapeamentoController(QObject):
             self._state.set_error("finalizar_zonal", error_msg)
         elif request_id in self._pending_status_oneshot_ids:
             zid = self._pending_status_oneshot_ids.pop(request_id)
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[Status] Falha one-shot zonal {zid}: {error_msg}",
                 PLUGIN_NAME, Qgis.Info,
             )
@@ -893,14 +905,14 @@ class MapeamentoController(QObject):
                         "reprocess",
                         f"Polling do zonal {zid} falhou 5 vezes consecutivas."
                     )
-                    QgsMessageLog.logMessage(
+                    log_message(
                         f"[Poll] Zonal {zid}: 5 erros consecutivos, polling encerrado",
                         PLUGIN_NAME, Qgis.Warning,
                     )
         elif request_id == self._pending_pareceres_id:
             self._pending_pareceres_id = None
             self._pending_pareceres_mapeamento_id = None
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Erro ao buscar pareceres: {error_msg}",
                 PLUGIN_NAME, Qgis.Warning,
             )
@@ -916,13 +928,13 @@ class MapeamentoController(QObject):
             self._state.set_error("compare", f"Erro ao baixar versão: {error_msg}")
         elif request_id in self._pending_overlay_ids:
             zonal_id = self._pending_overlay_ids.pop(request_id)
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Erro ao buscar overlay data para zonal {zonal_id}: {error_msg}",
                 PLUGIN_NAME, Qgis.Warning,
             )
         elif request_id in self._pending_mascara_ids:
             self._pending_mascara_ids.pop(request_id)
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Erro ao carregar mascara: {error_msg}",
                 PLUGIN_NAME, Qgis.Warning,
             )
@@ -1003,7 +1015,7 @@ class MapeamentoController(QObject):
             )
         )
         task.signals.status_message.connect(
-            lambda msg: QgsMessageLog.logMessage(msg, PLUGIN_NAME, Qgis.Info)
+            lambda msg: log_message(msg, PLUGIN_NAME, Qgis.Info)
         )
 
         self._active_tasks.append(task)
@@ -1016,12 +1028,12 @@ class MapeamentoController(QObject):
         self._state.set_loading(f"download:{zonal_id}", False)
         if success:
             self.zonal_download_completed.emit(gpkg_path, zonal_id, catalogo_meta or {})
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Download zonal concluido: {gpkg_path}", PLUGIN_NAME, Qgis.Info,
             )
         else:
             self._state.set_error(f"download:{zonal_id}", message)
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Download zonal falhou: {message}", PLUGIN_NAME, Qgis.Warning,
             )
 
@@ -1087,7 +1099,7 @@ class MapeamentoController(QObject):
             )
         )
         task.signals.status_message.connect(
-            lambda msg: QgsMessageLog.logMessage(msg, PLUGIN_NAME, Qgis.Info)
+            lambda msg: log_message(msg, PLUGIN_NAME, Qgis.Info)
         )
 
         self._active_tasks.append(task)
@@ -1103,7 +1115,7 @@ class MapeamentoController(QObject):
             self.mapeamento_homologado_download_completed.emit(
                 gpkg_path, mapeamento_id, catalogo_meta or {},
             )
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Download mapeamento homologado concluido: {gpkg_path}",
                 PLUGIN_NAME, Qgis.Info,
             )
@@ -1111,7 +1123,7 @@ class MapeamentoController(QObject):
             self._state.set_error(
                 f"download_homologado:{mapeamento_id}", message,
             )
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Download mapeamento homologado falhou: {message}",
                 PLUGIN_NAME, Qgis.Warning,
             )
@@ -1162,7 +1174,7 @@ class MapeamentoController(QObject):
             layer.setReadOnly(True)
 
         expires_at = sidecar.get("expiresAt", "?")
-        QgsMessageLog.logMessage(
+        log_message(
             f"[Upload] zonal={zonal_id} version={zonal_version} "
             f"token={edit_token[:8]}... expires={expires_at}",
             PLUGIN_NAME, Qgis.Info,
@@ -1192,7 +1204,7 @@ class MapeamentoController(QObject):
             )
         )
         task.signals.status_message.connect(
-            lambda msg: QgsMessageLog.logMessage(msg, PLUGIN_NAME, Qgis.Info)
+            lambda msg: log_message(msg, PLUGIN_NAME, Qgis.Info)
         )
         task.signals.upload_progress.connect(
             lambda data: self._on_upload_task_progress(data, zonal_id)
@@ -1246,17 +1258,17 @@ class MapeamentoController(QObject):
                 self._mark_uploaded(gpkg_path)
             except ValueError as error:
                 self._state.set_error("upload", str(error))
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Upload zonal persistido sem atualizar os metadados locais: {error}", PLUGIN_NAME, Qgis.Warning,
                 )
                 return
             self.zonal_upload_completed.emit(gpkg_path, zonal_id)
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Upload zonal concluido: {gpkg_path}", PLUGIN_NAME, Qgis.Info,
             )
         else:
             self._state.set_error("upload", message)
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Upload zonal falhou: {message}", PLUGIN_NAME, Qgis.Warning,
             )
 
@@ -1417,7 +1429,7 @@ class MapeamentoController(QObject):
                             if original_fid is not None and original_fid != 0 and not inclusion:
                                 deleted_originals.append(original_fid)
 
-                QgsMessageLog.logMessage(
+                log_message(
                     f"[EditTrack] beforeCommit: {len(buf.changedGeometries())} geom, "
                     f"{len(buf.changedAttributeValues())} attr, "
                     f"{len(buf.addedFeatures())} added, "
@@ -1427,12 +1439,12 @@ class MapeamentoController(QObject):
                     PLUGIN_NAME, Qgis.Info,
                 )
             else:
-                QgsMessageLog.logMessage(
+                log_message(
                     "[EditTrack] beforeCommit: editBuffer is None",
                     PLUGIN_NAME, Qgis.Warning,
                 )
         except Exception as e:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[EditTrack] erro em _capture_edited_fids: {e}",
                 PLUGIN_NAME, Qgis.Warning,
             )
@@ -1473,7 +1485,7 @@ class MapeamentoController(QObject):
         ofid_idx = layer.fields().indexOf("_original_fid")
         client_idx = layer.fields().indexOf("_client_feature_id")
         if sync_idx < 0:
-            QgsMessageLog.logMessage(
+            log_message(
                 "[EditTrack] campo _sync_status nao encontrado na layer",
                 PLUGIN_NAME, Qgis.Warning,
             )
@@ -1541,7 +1553,7 @@ class MapeamentoController(QObject):
             layer.dataProvider().forceReload()
             layer.triggerRepaint()
 
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[EditTrack] {modified_count} MODIFIED, {new_count} NEW "
                 f"(provider write ok={ok})",
                 PLUGIN_NAME, Qgis.Info,
@@ -1575,14 +1587,14 @@ class MapeamentoController(QObject):
                 provider.forceReload()
                 layer.triggerRepaint()
 
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[EditTrack] {deleted_count} tombstones DELETED inseridos "
                 f"(original_fids={deleted_originals}, provider write ok={ok})",
                 PLUGIN_NAME, Qgis.Info,
             )
 
         if not attr_changes and not deleted_originals:
-            QgsMessageLog.logMessage(
+            log_message(
                 "[EditTrack] nenhuma feature para marcar "
                 f"(changed_fids={len(changed_fids)})",
                 PLUGIN_NAME, Qgis.Info,

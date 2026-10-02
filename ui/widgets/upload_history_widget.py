@@ -13,7 +13,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from qgis.core import (
-    QgsProject, QgsVectorLayer, QgsMessageLog, Qgis,
+    QgsProject, QgsVectorLayer, Qgis,
     QgsCategorizedSymbolRenderer, QgsRendererCategory,
     QgsFillSymbol, QgsRectangle,
 )
@@ -22,14 +22,13 @@ from qgis.utils import iface as qgis_iface
 from ...domain.models.enums import UploadBatchStatusEnum
 from ...domain.services.upload_feedback import parse_rejections
 from ...infra.config.settings import PLUGIN_NAME
+from ...infra.message_log import log_message
 from ..theme import SectionHeader
 
 _ICONS_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
     "assets", "icons",
 )
-
-_PAGE_SIZE = 10
 
 _BATCH_COLORS = {
     "RECEIVED": "#9E9E9E",
@@ -354,7 +353,7 @@ class UploadHistoryWidget(QWidget):
         self._temp_files.append(tmp.name)
         self._compare_pending.pop(batch_uuid, None)
 
-        QgsMessageLog.logMessage(
+        log_message(
             f"[Compare] GPKG recebido: {batch_uuid[:8]} ({len(layer_bytes)} bytes)",
             PLUGIN_NAME, Qgis.Info,
         )
@@ -374,7 +373,7 @@ class UploadHistoryWidget(QWidget):
 
             layer = QgsVectorLayer(path, layer_name, "ogr")
             if not layer.isValid():
-                QgsMessageLog.logMessage(
+                log_message(
                     f"[Compare] Camada inválida: {path}",
                     PLUGIN_NAME, Qgis.Warning,
                 )
@@ -384,7 +383,7 @@ class UploadHistoryWidget(QWidget):
             QgsProject.instance().addMapLayer(layer)
             self._compare_layer_ids.append(layer.id())
 
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[Compare] Camada carregada: {layer_name} ({layer.featureCount()} feições)",
                 PLUGIN_NAME, Qgis.Info,
             )
@@ -444,7 +443,6 @@ class UploadHistoryWidget(QWidget):
         status = self._filter_status.currentData() or ""
         self._controller.load_upload_history(
             page=self._current_page,
-            size=_PAGE_SIZE,
             status=status,
         )
 

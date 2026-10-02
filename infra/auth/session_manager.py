@@ -5,9 +5,10 @@ from urllib.parse import urlencode
 
 from qgis.PyQt.QtCore import QObject, QTimer, QByteArray, QUrl, pyqtSignal
 from qgis.PyQt.QtNetwork import QNetworkRequest
-from qgis.core import QgsNetworkAccessManager, QgsMessageLog, Qgis
+from qgis.core import QgsNetworkAccessManager, Qgis
 
 from ..config.settings import PLUGIN_NAME
+from ..message_log import log_message
 from .token_store import TokenStore
 
 
@@ -55,7 +56,7 @@ class SessionManager(QObject):
         refresh_in_ms = int(remaining * 0.75 * 1000)
         self._refresh_timer.start(max(refresh_in_ms, 5000))
 
-        QgsMessageLog.logMessage(
+        log_message(
             f"Refresh agendado em {refresh_in_ms // 1000}s",
             PLUGIN_NAME, Qgis.Info,
         )
@@ -102,16 +103,16 @@ class SessionManager(QObject):
                 self._store.store_tokens(token_data)
                 self._schedule_refresh()
                 self.session_refreshed.emit()
-                QgsMessageLog.logMessage(
+                log_message(
                     "Sessao renovada com sucesso", PLUGIN_NAME, Qgis.Info,
                 )
             except Exception as e:
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Erro ao processar refresh: {e}", PLUGIN_NAME, Qgis.Warning,
                 )
                 self.session_expired.emit()
         else:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Refresh falhou (HTTP {status})", PLUGIN_NAME, Qgis.Warning,
             )
             self.stop()

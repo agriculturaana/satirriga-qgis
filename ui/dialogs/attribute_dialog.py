@@ -259,11 +259,12 @@ class AttributeEditDialog(QDialog):
         Args:
             late_inject: se True, insere antes do stretch (ultima posicao util).
         """
-        from qgis.core import QgsMessageLog, Qgis
+        from qgis.core import Qgis
+        from ...infra.message_log import log_message
         _TAG = "SatIrriga"
 
         if not self._overlay:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[Overlay/Dialog] overlay vazio ou None para feature #{self._fid}",
                 _TAG, Qgis.Info,
             )
@@ -272,14 +273,14 @@ class AttributeEditDialog(QDialog):
         # Resolve overlay para esta feature pelo _original_fid (= ZonalGeometria.id)
         original_fid_idx = self._layer.fields().indexOf("_original_fid")
         if original_fid_idx < 0:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[Overlay/Dialog] campo _original_fid nao encontrado no layer",
                 _TAG, Qgis.Warning,
             )
             return
         original_fid = self._feature.attribute(original_fid_idx)
         if original_fid is None:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[Overlay/Dialog] _original_fid e NULL para feature #{self._fid}",
                 _TAG, Qgis.Warning,
             )
@@ -288,7 +289,7 @@ class AttributeEditDialog(QDialog):
         overlay_keys = list(self._overlay.keys())[:5]
         entry = self._overlay.get(str(original_fid)) or self._overlay.get(original_fid)
         if not entry:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[Overlay/Dialog] chave {original_fid!r} (tipo {type(original_fid).__name__}) "
                 f"nao encontrada no overlay. Chaves disponiveis: {overlay_keys}",
                 _TAG, Qgis.Warning,

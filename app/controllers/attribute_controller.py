@@ -5,9 +5,10 @@ Quando o layer ativo e SatIrriga (tem campo _sync_status) e exatamente
 """
 
 from qgis.PyQt.QtCore import QObject, pyqtSignal
-from qgis.core import QgsVectorLayer, QgsMessageLog, Qgis
+from qgis.core import QgsVectorLayer, Qgis
 
 from ...infra.config.settings import PLUGIN_NAME
+from ...infra.message_log import log_message
 
 
 class AttributeEditController(QObject):
@@ -115,14 +116,14 @@ class AttributeEditController(QObject):
         self._dialog.finished.connect(self._on_dialog_finished)
         self._dialog.show()
 
-        QgsMessageLog.logMessage(
+        log_message(
             f"Dialog de atributos aberto para feature #{feature.id()}",
             PLUGIN_NAME, Qgis.Info,
         )
 
     def _on_feature_saved(self, fid):
         """Handler apos salvar feature — propaga signal para o plugin."""
-        QgsMessageLog.logMessage(
+        log_message(
             f"Atributos da feature #{fid} salvos",
             PLUGIN_NAME, Qgis.Info,
         )

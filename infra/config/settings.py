@@ -25,7 +25,9 @@ DEFAULTS = {
     "environment": "production",
     "gpkg_base_dir": "",
     "page_size": 15,
-    "polling_interval_ms": 3000,
+    # Consulta da situação das zonais a cada segundo, para que os cartões acompanhem as transições do servidor sem
+    # atraso perceptível.
+    "polling_interval_ms": 1000,
     "auto_zoom_on_load": True,
     "log_level": "INFO",
 }

@@ -9,9 +9,10 @@ from urllib.parse import urlencode, urlparse, parse_qs
 
 from qgis.PyQt.QtCore import QObject, QUrl, pyqtSignal
 from qgis.PyQt.QtGui import QDesktopServices
-from qgis.core import QgsMessageLog, Qgis
+from qgis.core import Qgis
 
 from ..config.settings import PLUGIN_NAME
+from ..message_log import log_message
 
 # Range de portas para o loopback server
 _PORT_RANGE = range(8400, 8411)
@@ -226,7 +227,7 @@ class OidcPkceFlow(QObject):
                 )
                 self._server_thread.start()
 
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Loopback server iniciado na porta {port}",
                     PLUGIN_NAME, Qgis.Info,
                 )
@@ -234,7 +235,7 @@ class OidcPkceFlow(QObject):
             except OSError:
                 continue
 
-        QgsMessageLog.logMessage(
+        log_message(
             "Falha ao iniciar loopback server em todas as portas",
             PLUGIN_NAME, Qgis.Critical,
         )
@@ -264,7 +265,7 @@ class OidcPkceFlow(QObject):
         }
         auth_url = f"{auth_endpoint}?{urlencode(params)}"
 
-        QgsMessageLog.logMessage(
+        log_message(
             "Abrindo browser para autenticação...",
             PLUGIN_NAME, Qgis.Info,
         )

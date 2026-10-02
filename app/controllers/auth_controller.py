@@ -5,9 +5,10 @@ from urllib.parse import urlencode
 
 from qgis.PyQt.QtCore import QObject, QUrl, QByteArray
 from qgis.PyQt.QtNetwork import QNetworkRequest
-from qgis.core import QgsNetworkAccessManager, QgsMessageLog, Qgis
+from qgis.core import QgsNetworkAccessManager, Qgis
 
 from ...infra.config.settings import PLUGIN_NAME
+from ...infra.message_log import log_message
 from ...infra.auth.oidc_pkce import OidcPkceFlow
 from ...infra.auth.token_store import TokenStore
 from ...infra.auth.session_manager import SessionManager
@@ -106,7 +107,7 @@ class AuthController(QObject):
                 self._state.user = user
                 self._state.is_authenticated = True
 
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Login bem-sucedido: {user.email}",
                     PLUGIN_NAME, Qgis.Info,
                 )
@@ -118,7 +119,7 @@ class AuthController(QObject):
     def _on_auth_error(self, message):
         self._state.set_loading("auth", False)
         self._state.set_error("auth", message)
-        QgsMessageLog.logMessage(
+        log_message(
             f"Auth error: {message}", PLUGIN_NAME, Qgis.Warning,
         )
 
@@ -185,11 +186,11 @@ class AuthController(QObject):
             user = UserInfo.from_jwt_claims(claims, self._get_resource_id())
             self._state.user = user
             self._state.is_authenticated = True
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Sessao restaurada: {user.email}", PLUGIN_NAME, Qgis.Info,
             )
         else:
-            QgsMessageLog.logMessage(
+            log_message(
                 "Restauracao de sessao falhou", PLUGIN_NAME, Qgis.Info,
             )
 
@@ -206,7 +207,7 @@ class AuthController(QObject):
         self._state.is_authenticated = False
         self._state.user = None
 
-        QgsMessageLog.logMessage("Logout realizado", PLUGIN_NAME, Qgis.Info)
+        log_message("Logout realizado", PLUGIN_NAME, Qgis.Info)
 
     # ----------------------------------------------------------------
     # Cleanup

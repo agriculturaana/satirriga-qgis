@@ -219,7 +219,8 @@ class ConfigTab(QWidget):
         """Salva configuração de visualização para QgsSettings."""
         from ...domain.models.raster import VisParams
         from ...domain.services.vis_config_service import save_global_vis_params
-        from qgis.core import QgsMessageLog, Qgis
+        from qgis.core import Qgis
+        from ...infra.message_log import log_message
 
         for band_key, widgets in self._vis_widgets.items():
             palette_val = widgets["palette"].currentData()
@@ -231,7 +232,7 @@ class ConfigTab(QWidget):
                 palette=palette_val or None,
             )
             save_global_vis_params(band_key, params)
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[VisConfig] Salvo {band_key}: min={params.min_val} max={params.max_val} "
                 f"gamma={params.gamma} palette={params.palette}",
                 "SatIrriga", Qgis.Info,
@@ -300,8 +301,9 @@ class ConfigTab(QWidget):
         try:
             self._save_vis_config()
         except Exception as e:
-            from qgis.core import QgsMessageLog, Qgis
-            QgsMessageLog.logMessage(
+            from qgis.core import Qgis
+            from ...infra.message_log import log_message
+            log_message(
                 f"[Config] Erro ao salvar vis config: {e}",
                 "SatIrriga", Qgis.Warning,
             )

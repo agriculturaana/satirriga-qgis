@@ -11,7 +11,7 @@ from qgis.PyQt.QtWidgets import (
     QFrame, QSizePolicy, QGraphicsDropShadowEffect, QToolButton,
 )
 
-from qgis.core import QgsMessageLog, Qgis
+from qgis.core import Qgis
 
 from ..theme import SectionHeader
 from ..icon_utils import tinted_icon
@@ -24,9 +24,7 @@ _ICONS_DIR = os.path.join(
     "assets", "icons",
 )
 from ...infra.config.settings import PLUGIN_NAME
-
-# Itens por página padrão (server-side)
-_PAGE_SIZE = 5
+from ...infra.message_log import log_message
 
 # Opções de ordenação: label exibido → campo da API
 _SORT_OPTIONS = [
@@ -635,7 +633,6 @@ class MapeamentosTab(QWidget):
 
         self._controller.load_catalogo(
             page=self._current_page,
-            size=_PAGE_SIZE,
             status=status,
             metodo=metodo,
             mapeamento_id=mapeamento_id,
@@ -839,7 +836,7 @@ class MapeamentosTab(QWidget):
 
     def _on_reprocess_done(self, zonal_id, message):
         """Callback após reprocessamento disparado — recarrega catálogo para mostrar progresso."""
-        QgsMessageLog.logMessage(
+        log_message(
             f"[Reprocess] Zonal #{zonal_id}: {message}", PLUGIN_NAME, Qgis.Info,
         )
         self._request_page()

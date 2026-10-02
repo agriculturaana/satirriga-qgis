@@ -2,9 +2,10 @@ import uuid
 
 from qgis.PyQt.QtCore import QObject, QUrl, QByteArray, pyqtSignal
 from qgis.PyQt.QtNetwork import QNetworkRequest
-from qgis.core import QgsNetworkAccessManager, QgsMessageLog, Qgis
+from qgis.core import QgsNetworkAccessManager, Qgis
 
 from ...infra.config.settings import PLUGIN_NAME
+from ...infra.message_log import log_message
 from .auth_interceptor import AuthInterceptor
 from .errors import normalize_error
 
@@ -43,7 +44,7 @@ class HttpClient(QObject):
             req = self._interceptor.intercept(req)
             has_token = bool(req.rawHeader(b"Authorization"))
 
-        QgsMessageLog.logMessage(
+        log_message(
             f"[HTTP] {method} {url} (auth={has_token})",
             PLUGIN_NAME, Qgis.Info,
         )
@@ -86,7 +87,7 @@ class HttpClient(QObject):
         reply.deleteLater()
 
         if error and status_code == 0:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[HTTP] ERRO DE REDE {req_url} -> {error_msg}",
                 PLUGIN_NAME, Qgis.Warning,
             )
@@ -94,7 +95,7 @@ class HttpClient(QObject):
             return
 
         if 200 <= status_code < 300:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[HTTP] {status_code} {req_url} ({len(body)} bytes)",
                 PLUGIN_NAME, Qgis.Info,
             )
@@ -102,7 +103,7 @@ class HttpClient(QObject):
         else:
             api_error = normalize_error(status_code, body)
             body_preview = body[:500].decode("utf-8", errors="replace") if body else ""
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[HTTP] {status_code} {req_url} -> {api_error.message}\n{body_preview}",
                 PLUGIN_NAME, Qgis.Warning,
             )

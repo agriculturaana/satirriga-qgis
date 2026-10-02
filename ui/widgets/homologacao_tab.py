@@ -520,7 +520,6 @@ class HomologacaoTab(QWidget):
             author=self._filter_author.text().strip(),
             descricao=self._filter_descricao.text().strip(),
             page=self._current_page,
-            size=20,
             sort=sort_field,
             direction=sort_direction,
         )

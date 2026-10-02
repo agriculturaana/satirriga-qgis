@@ -3,9 +3,10 @@
 import json
 
 from qgis.PyQt.QtCore import QObject, pyqtSignal
-from qgis.core import QgsMessageLog, Qgis
+from qgis.core import Qgis
 
 from ...infra.config.settings import PLUGIN_NAME
+from ...infra.message_log import log_message
 from ...infra.http.client import HttpClient
 
 
@@ -46,7 +47,7 @@ class TimeSeriesController(QObject):
             ]
         }).encode("utf-8")
         self._pending_id = self._http.post_json(url, payload)
-        QgsMessageLog.logMessage(
+        log_message(
             f"[TimeSeries] Consultando {len(points)} ponto(s) "
             f"de {start_date} a {end_date}",
             PLUGIN_NAME, Qgis.Info,
@@ -63,12 +64,12 @@ class TimeSeriesController(QObject):
                 data = [data]
             results = [TimeSeriesResult.from_dict(item) for item in data]
             self.timeseries_data_ready.emit(results)
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[TimeSeries] {len(results)} serie(s) recebida(s)",
                 PLUGIN_NAME, Qgis.Info,
             )
         except Exception as e:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[TimeSeries] Erro ao parsear resposta: {e}",
                 PLUGIN_NAME, Qgis.Warning,
             )
@@ -78,7 +79,7 @@ class TimeSeriesController(QObject):
         if request_id != self._pending_id:
             return
         self._pending_id = None
-        QgsMessageLog.logMessage(
+        log_message(
             f"[TimeSeries] Erro na requisição: {error_msg}",
             PLUGIN_NAME, Qgis.Warning,
         )

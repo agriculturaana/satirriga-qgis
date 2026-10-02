@@ -5,9 +5,10 @@ from urllib.parse import urlparse
 
 from qgis.PyQt.QtCore import QObject, QUrl, QByteArray
 from qgis.PyQt.QtNetwork import QNetworkRequest
-from qgis.core import QgsNetworkAccessManager, QgsMessageLog, Qgis
+from qgis.core import QgsNetworkAccessManager, Qgis
 
 from ...infra.config.settings import PLUGIN_NAME, DEFAULTS
+from ...infra.message_log import log_message
 from ...infra.config.repository import ConfigRepository
 
 
@@ -30,7 +31,7 @@ class ConfigController(QObject):
             if self._config.get(key) != value:
                 changed_keys.add(key)
             self._config.set(key, value)
-        QgsMessageLog.logMessage(
+        log_message(
             "Configuracoes salvas", PLUGIN_NAME, Qgis.Info,
         )
         if changed_keys and self._state is not None:
@@ -39,7 +40,7 @@ class ConfigController(QObject):
     def restore_defaults(self):
         previous = self._config.get_all()
         self._config.restore_defaults()
-        QgsMessageLog.logMessage(
+        log_message(
             "Configuracoes restauradas para defaults", PLUGIN_NAME, Qgis.Info,
         )
         if self._state is None:
@@ -54,7 +55,7 @@ class ConfigController(QObject):
         url = self._config.get("api_base_url").rstrip("/") + "/actuator/health"
         nam = QgsNetworkAccessManager.instance()
 
-        QgsMessageLog.logMessage(
+        log_message(
             f"[HTTP] GET {url} (auth=False)", PLUGIN_NAME, Qgis.Info,
         )
         req = QNetworkRequest(QUrl(url))
@@ -74,17 +75,17 @@ class ConfigController(QObject):
         reply.deleteLater()
 
         if status and 200 <= status < 300:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[HTTP] {status} {url}", PLUGIN_NAME, Qgis.Info,
             )
             callback(True, f"Conexao OK (HTTP {status})")
         elif status:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[HTTP] {status} {url}", PLUGIN_NAME, Qgis.Warning,
             )
             callback(False, f"Servidor respondeu HTTP {status}")
         else:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"[HTTP] ERRO DE REDE {url} -> {error_string}",
                 PLUGIN_NAME, Qgis.Warning,
             )

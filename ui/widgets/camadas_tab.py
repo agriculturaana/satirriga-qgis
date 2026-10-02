@@ -10,11 +10,12 @@ from qgis.PyQt.QtWidgets import (
     QListWidget, QListWidgetItem, QSizePolicy, QMessageBox,
     QGraphicsDropShadowEffect, QComboBox, QToolButton,
 )
-from qgis.core import QgsProject, QgsVectorLayer, QgsMessageLog, Qgis
+from qgis.core import QgsProject, QgsVectorLayer, Qgis
 
 from ...domain.models.enums import SyncStatusEnum, ZonalStatusEnum
 from ...domain.services.mapeamento_service import format_metodo_label
 from ...infra.config.settings import PLUGIN_NAME
+from ...infra.message_log import log_message
 from ..theme import SectionHeader
 from ..icon_utils import tinted_icon
 
@@ -557,7 +558,7 @@ class CamadasTab(QWidget):
         badge.setVisible(True)
 
     def _on_upload_cancelled(self):
-        QgsMessageLog.logMessage(
+        log_message(
             f"Upload cancelado pelo usuario: batch {self._active_batch_uuid}",
             PLUGIN_NAME, Qgis.Info,
         )
@@ -653,7 +654,7 @@ class CamadasTab(QWidget):
                 entry["sync_counts"] = count_features_by_sync_status(entry["path"])
             self._gpkg_list = raw_list
         except Exception as e:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Erro ao listar GPKGs: {e}", PLUGIN_NAME, Qgis.Warning,
             )
             self._gpkg_list = []
@@ -718,7 +719,7 @@ class CamadasTab(QWidget):
 
         for existing in QgsProject.instance().mapLayers().values():
             if existing.source().split("|")[0] == gpkg_path:
-                QgsMessageLog.logMessage(
+                log_message(
                     f"Camada ja carregada: {gpkg_path}", PLUGIN_NAME, Qgis.Info,
                 )
                 return
@@ -745,11 +746,11 @@ class CamadasTab(QWidget):
                 # Busca dados de overlay para enriquecer dialog de atributos
                 self._controller.fetch_overlay_data(zonal_id)
 
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Camada aberta: {gpkg_path}", PLUGIN_NAME, Qgis.Info,
             )
         else:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Falha ao abrir GPKG: {gpkg_path}", PLUGIN_NAME, Qgis.Warning,
             )
 
@@ -833,12 +834,12 @@ class CamadasTab(QWidget):
             if os.path.exists(sc_path):
                 os.remove(sc_path)
 
-            QgsMessageLog.logMessage(
+            log_message(
                 f"GPKG removido: {gpkg_path}", PLUGIN_NAME, Qgis.Info,
             )
             self._refresh_list()
         except OSError as e:
-            QgsMessageLog.logMessage(
+            log_message(
                 f"Erro ao remover GPKG: {e}", PLUGIN_NAME, Qgis.Warning,
             )
 

@@ -1,9 +1,10 @@
 """Base para tasks assincronas do SatIrriga."""
 
 from qgis.PyQt.QtCore import QObject, pyqtSignal
-from qgis.core import QgsTask, QgsMessageLog, Qgis
+from qgis.core import QgsTask, Qgis
 
 from ..config.settings import PLUGIN_NAME
+from ..message_log import log_message
 
 
 class TaskSignals(QObject):
@@ -24,7 +25,7 @@ class SatIrrigaTask(QgsTask):
         self._exception = None
 
     def _log(self, message, level=Qgis.Info):
-        QgsMessageLog.logMessage(message, PLUGIN_NAME, level)
+        log_message(message, PLUGIN_NAME, level)
 
     def run(self):
         """Implementar nas subclasses. Roda em worker thread."""
