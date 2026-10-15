@@ -1,14 +1,18 @@
 [general]
 name=SatIrriga QGIS
 qgisMinimumVersion=3.22
+qgisMaximumVersion=4.99
 description=QGIS client for the SatIrriga platform (ANA/INPE). Browse, download, edit, and submit satellite-based irrigation maps.
-version=3.2.0
+version=4.0.0
 author=Tharles de Sousa Andrade | ANA | INPE
 email=irtharles@gmail.com
 
 about=SatIrriga QGIS is the official desktop client for the SatIrriga platform, a satellite-based irrigation monitoring system developed jointly by ANA (Brazil's National Water and Sanitation Agency) and INPE (Brazil's National Institute for Space Research). The plugin enables a complete field-validation workflow without leaving the QGIS environment: authenticate securely via Single Sign-On (OIDC/PKCE through Keycloak); browse the zonal catalog and download geospatial results as editable GeoPackage files via FlatGeobuf; refine geometries using the full suite of QGIS sketching and editing tools; and submit revisions back to the Feature Server with asynchronous processing and conflict resolution. Designed for analysts and technicians who review remote-sensing-derived irrigation maps, the plugin streamlines the review-and-correction cycle that is central to the SatIrriga quality-assurance process.
 
 changelog=
+  4.0.0
+  - QGIS 4 (Qt6) support, keeping compatibility with QGIS 3.22 or later
+  - Qt and QGIS enums written in the scoped form accepted by PyQt5 and PyQt6; compiled resources import Qt through qgis.PyQt
   3.2.0 (requires the updated SatIrriga server)
   - Upload protected against loss and duplication: per-operation identity, package persisted before transfer, receipt recovered after connection loss
   - Reprocess button for zonals with calculation stalled for more than two hours

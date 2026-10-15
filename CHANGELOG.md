@@ -5,6 +5,16 @@ Todas as mudancas notaveis do SatIrriga QGIS Plugin serao documentadas neste arq
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
 e o versionamento segue [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
+## [4.0.0] - 2026-10-14
+
+### Adicionado
+
+- **Compatibilidade com o QGIS 4 (Qt6):** o plugin passa a ser instalável no QGIS 4 e continua compatível com o QGIS 3.22 ou posterior
+
+### Alterado
+
+- Enumerações do Qt e do QGIS escritas na forma qualificada aceita pelo PyQt5 e pelo PyQt6; os recursos compilados importam o Qt por `qgis.PyQt`
+
 ## [3.2.0] - 2026-10-02
 
 Requer o servidor SatIrriga com o envio identificado por operação, o envelope de erros `{code, message}` e o novo formato de conflitos.
