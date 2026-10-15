@@ -155,8 +155,12 @@ class SessionManager(QObject):
                 self.start()
                 callback(True)
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                log_message(
+                    f"Erro ao processar restauracao de sessao: {e}",
+                    PLUGIN_NAME, Qgis.Warning,
+                )
+                self.stop()
 
         self._store.clear()
         callback(False)

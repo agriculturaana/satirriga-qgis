@@ -293,8 +293,11 @@ class SatIrrigaPlugin:
                     )
                 else:
                     QgsNetworkAccessManager.setRequestPreprocessor(None)
-            except Exception:
-                pass
+            except Exception as e:
+                self._log(
+                    f"[Auth] Falha ao remover interceptor de tiles: {e}",
+                    Qgis.Warning,
+                )
             self._tile_auth_set = False
             self._tile_auth_processor_id = None
             self._tile_auth_api_host = None
@@ -789,9 +792,12 @@ class SatIrrigaPlugin:
                     b"Authorization",
                     f"Bearer {token}".encode("utf-8"),
                 )
-        except Exception:
+        except Exception as e:
             # Nunca propagar excecao para a thread de rede do Qt
-            pass
+            self._log(
+                f"[Auth] Falha ao injetar token em tile base: {e}",
+                Qgis.Warning,
+            )
 
     def _setup_tile_auth(self):
         """Registra interceptor global para injetar Bearer token em tiles base.
@@ -1295,10 +1301,7 @@ class SatIrrigaPlugin:
             from osgeo import ogr, gdal
         except ImportError:
             return []
-        try:
-            gdal.UseExceptions()
-        except Exception:  # noqa: BLE001
-            pass
+        gdal.UseExceptions()
         try:
             ds = ogr.Open(gpkg_path, 0)
         except Exception as exc:  # noqa: BLE001

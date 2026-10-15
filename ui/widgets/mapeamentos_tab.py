@@ -563,8 +563,11 @@ class MapeamentosTab(QWidget):
             row5.addStretch()
 
             layout.addLayout(row5)
-        except Exception:
-            pass
+        except Exception as e:
+            log_message(
+                f"[Catálogo] Falha ao exibir situação local do zonal #{item.id}: {e}",
+                PLUGIN_NAME, Qgis.Warning,
+            )
 
         card.setLayout(layout)
         card._download_btn = btn

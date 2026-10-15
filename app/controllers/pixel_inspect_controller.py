@@ -143,7 +143,7 @@ class PixelInspectController(QObject):
         if self._pending_id:
             try:
                 self._http.cancel(self._pending_id)
-            except Exception:
+            except RuntimeError:
                 pass
         self._pending_id = None
         self._pending_coords = None

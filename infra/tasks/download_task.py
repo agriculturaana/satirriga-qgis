@@ -87,16 +87,11 @@ class DownloadZonalTask(SatIrrigaTask):
             # ----------------------------------------------------------
             # 1. Checkout (5-15%) — pulado em modo somente leitura
             # ----------------------------------------------------------
-            edit_token = ""
-            zonal_version = 0
-            feature_count = 0
-            snapshot_hash = ""
-            expires_at = ""
-
             if self._read_only:
                 self.signals.status_message.emit("Baixando (somente leitura)...")
                 self.setProgress(15)
                 self._log(f"[Download] Modo somente leitura — checkout ignorado")
+                checkout_data = {"editToken": "", "zonalVersion": 0}
             else:
                 self.signals.status_message.emit("Realizando checkout...")
                 self.setProgress(5)
@@ -143,13 +138,13 @@ class DownloadZonalTask(SatIrrigaTask):
                 checkout_resp.raise_for_status()
 
                 checkout_data = checkout_resp.json()
-                edit_token = checkout_data["editToken"]
-                zonal_version = checkout_data["zonalVersion"]
-                feature_count = checkout_data.get("featureCount", 0)
-                snapshot_hash = checkout_data.get("snapshotHash", "")
-                expires_at = checkout_data.get("expiresAt", "")
-
                 self.setProgress(15)
+
+            edit_token = checkout_data["editToken"]
+            zonal_version = checkout_data["zonalVersion"]
+            feature_count = checkout_data.get("featureCount", 0)
+            snapshot_hash = checkout_data.get("snapshotHash", "")
+            expires_at = checkout_data.get("expiresAt", "")
 
             if self.isCanceled():
                 return False

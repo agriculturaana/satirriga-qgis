@@ -328,6 +328,9 @@ class OidcPkceFlow(QObject):
             try:
                 self._server.shutdown()
                 self._server.server_close()
-            except Exception:
-                pass
+            except OSError as e:
+                log_message(
+                    f"Falha ao encerrar loopback server: {e}",
+                    PLUGIN_NAME, Qgis.Warning,
+                )
             self._server = None

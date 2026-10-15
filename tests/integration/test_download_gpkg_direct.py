@@ -328,6 +328,69 @@ class TestDownloadZonalTaskGpkg:
         assert get_headers["If-None-Match"] == '"gpkg-v7-42-1"'
         assert get_headers["Accept"] == "application/geopackage+sqlite3"
 
+    def test_read_only_skips_checkout_and_writes_empty_edit_token(self, temp_dir, monkeypatch, download_module):
+        module = download_module
+        gpkg_bytes = _create_server_gpkg(
+            os.path.join(temp_dir, "server.gpkg"),
+            SAMPLE_FEATURES[:1],
+        )
+        post_mock = MagicMock()
+        monkeypatch.setattr(module.requests, "post", post_mock)
+        monkeypatch.setattr(
+            module.requests,
+            "get",
+            MagicMock(return_value=_Response(200, gpkg_bytes)),
+        )
+
+        output_path = os.path.join(temp_dir, "zonal_42", "zonal_42.gpkg")
+        task = module.DownloadZonalTask(
+            checkout_url="https://api.test/zonal/42/checkout",
+            download_url="https://api.test/zonal/42/download-result.gpkg",
+            access_token="access-token",
+            gpkg_output_path=output_path,
+            zonal_id=42,
+            read_only=True,
+            origin="mapeamentos",
+        )
+
+        assert task.run() is True
+        post_mock.assert_not_called()
+
+        features = read_gpkg_features(output_path)
+        assert features[0]["_edit_token"] == ""
+
+        sidecar = module.read_sidecar(output_path)
+        assert sidecar["editToken"] == ""
+        assert sidecar["zonalVersion"] == 0
+        assert sidecar["snapshotHash"] == ""
+        assert sidecar["expiresAt"] == ""
+        assert sidecar["readOnly"] is True
+
+    def test_checkout_without_edit_token_aborts_download(self, temp_dir, monkeypatch, download_module):
+        module = download_module
+        monkeypatch.setattr(
+            module.requests,
+            "post",
+            MagicMock(return_value=_Response(200, json_data={"zonalVersion": 7})),
+        )
+        get_mock = MagicMock()
+        monkeypatch.setattr(module.requests, "get", get_mock)
+
+        output_path = os.path.join(temp_dir, "zonal_42", "zonal_42.gpkg")
+        task = module.DownloadZonalTask(
+            checkout_url="https://api.test/zonal/42/checkout",
+            download_url="https://api.test/zonal/42/download-result.gpkg",
+            access_token="access-token",
+            gpkg_output_path=output_path,
+            zonal_id=42,
+            origin="mapeamentos",
+        )
+
+        assert task.run() is False
+        assert isinstance(task._exception, KeyError)
+        get_mock.assert_not_called()
+        assert not os.path.exists(output_path)
+
 
 def test_controller_uses_direct_gpkg_endpoint():
     root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
