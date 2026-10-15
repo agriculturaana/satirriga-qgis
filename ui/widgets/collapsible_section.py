@@ -20,16 +20,16 @@ class CollapsibleSection(QWidget):
 
         # Header: botao clicavel com seta
         self._toggle_btn = QToolButton()
-        self._toggle_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._toggle_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._toggle_btn.setAutoRaise(True)
         self._toggle_btn.setCheckable(True)
         self._toggle_btn.setChecked(expanded)
-        self._toggle_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._toggle_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         label = f"{icon} {title}".strip() if icon else title
         self._toggle_btn.setText(f"  {label}")
         self._toggle_btn.setArrowType(
-            Qt.DownArrow if expanded else Qt.RightArrow
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
         )
         self._toggle_btn.setStyleSheet(
             "QToolButton {"
@@ -48,8 +48,8 @@ class CollapsibleSection(QWidget):
 
         # Content frame
         self._content = QFrame()
-        self._content.setFrameShape(QFrame.NoFrame)
-        self._content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._content.setFrameShape(QFrame.Shape.NoFrame)
+        self._content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         # Layout
         layout = QVBoxLayout()
@@ -82,7 +82,7 @@ class CollapsibleSection(QWidget):
     def _on_toggle(self, checked):
         self._expanded = checked
         self._toggle_btn.setArrowType(
-            Qt.DownArrow if checked else Qt.RightArrow
+            Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow
         )
 
         if checked:
@@ -97,7 +97,7 @@ class CollapsibleSection(QWidget):
         anim.setDuration(self._animation_duration)
         anim.setStartValue(self._content.maximumHeight())
         anim.setEndValue(target)
-        anim.setEasingCurve(QEasingCurve.InOutQuad)
+        anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
 
         if checked:
             # Ao terminar a expansao, remove limite de altura

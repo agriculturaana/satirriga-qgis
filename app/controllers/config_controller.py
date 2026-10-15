@@ -32,7 +32,7 @@ class ConfigController(QObject):
                 changed_keys.add(key)
             self._config.set(key, value)
         log_message(
-            "Configuracoes salvas", PLUGIN_NAME, Qgis.Info,
+            "Configuracoes salvas", PLUGIN_NAME, Qgis.MessageLevel.Info,
         )
         if changed_keys and self._state is not None:
             self._state.config_changed.emit(changed_keys)
@@ -41,7 +41,7 @@ class ConfigController(QObject):
         previous = self._config.get_all()
         self._config.restore_defaults()
         log_message(
-            "Configuracoes restauradas para defaults", PLUGIN_NAME, Qgis.Info,
+            "Configuracoes restauradas para defaults", PLUGIN_NAME, Qgis.MessageLevel.Info,
         )
         if self._state is None:
             return
@@ -56,7 +56,7 @@ class ConfigController(QObject):
         nam = QgsNetworkAccessManager.instance()
 
         log_message(
-            f"[HTTP] GET {url} (auth=False)", PLUGIN_NAME, Qgis.Info,
+            f"[HTTP] GET {url} (auth=False)", PLUGIN_NAME, Qgis.MessageLevel.Info,
         )
         req = QNetworkRequest(QUrl(url))
         req.setRawHeader(b"Accept", b"application/json")
@@ -68,7 +68,7 @@ class ConfigController(QObject):
 
     def _on_test_finished(self, reply, callback):
         self._test_reply = None
-        status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
         body = bytes(reply.readAll())
         url = reply.url().toString()
         error_string = reply.errorString()
@@ -76,17 +76,17 @@ class ConfigController(QObject):
 
         if status and 200 <= status < 300:
             log_message(
-                f"[HTTP] {status} {url}", PLUGIN_NAME, Qgis.Info,
+                f"[HTTP] {status} {url}", PLUGIN_NAME, Qgis.MessageLevel.Info,
             )
             callback(True, f"Conexao OK (HTTP {status})")
         elif status:
             log_message(
-                f"[HTTP] {status} {url}", PLUGIN_NAME, Qgis.Warning,
+                f"[HTTP] {status} {url}", PLUGIN_NAME, Qgis.MessageLevel.Warning,
             )
             callback(False, f"Servidor respondeu HTTP {status}")
         else:
             log_message(
                 f"[HTTP] ERRO DE REDE {url} -> {error_string}",
-                PLUGIN_NAME, Qgis.Warning,
+                PLUGIN_NAME, Qgis.MessageLevel.Warning,
             )
             callback(False, f"Erro de rede: {error_string}")

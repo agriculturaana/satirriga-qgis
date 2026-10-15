@@ -24,7 +24,7 @@ class SessionPopup(QFrame):
         self._state = state
         self._auth = auth_controller
 
-        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.setFixedWidth(300)
 
         self._setup_style()
@@ -57,7 +57,7 @@ class SessionPopup(QFrame):
 
         # Detalhes do usuario
         form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignRight)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form.setSpacing(6)
 
         self._name_label = QLabel("-")
@@ -89,7 +89,7 @@ class SessionPopup(QFrame):
         self._countdown_label.setStyleSheet(
             "font-size: 20px; font-weight: bold; color: #4CAF50; border: none;"
         )
-        self._countdown_label.setAlignment(Qt.AlignCenter)
+        self._countdown_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         countdown_layout.addWidget(self._countdown_label)
         countdown_layout.addStretch()
         layout.addLayout(countdown_layout)
@@ -104,7 +104,7 @@ class SessionPopup(QFrame):
         self._logout_btn.setIconSize(QSize(16, 16))
         self._logout_btn.setFixedWidth(120)
         self._logout_btn.setToolTip("Encerrar sessão e revogar tokens")
-        self._logout_btn.setCursor(Qt.PointingHandCursor)
+        self._logout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._logout_btn.setStyleSheet(
             "QPushButton { background-color: #F44336; color: white; "
             "border-radius: 4px; padding: 6px 16px; border: none; }"
@@ -119,7 +119,7 @@ class SessionPopup(QFrame):
 
     def _make_separator(self):
         sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet("border: none; background-color: palette(mid); max-height: 1px;")
         return sep
 

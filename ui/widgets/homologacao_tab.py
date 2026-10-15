@@ -150,10 +150,10 @@ class HomologacaoTab(QWidget):
 
         # Lista de cards
         self._card_list = QListWidget()
-        self._card_list.setSelectionMode(QListWidget.NoSelection)
-        self._card_list.setFocusPolicy(Qt.NoFocus)
-        self._card_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._card_list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        self._card_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self._card_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._card_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._card_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self._card_list.setSpacing(4)
         self._card_list.setStyleSheet(
             "QListWidget { border: none; background: transparent; }"
@@ -173,7 +173,7 @@ class HomologacaoTab(QWidget):
         pag.addWidget(self._btn_prev)
 
         self._page_label = QLabel()
-        self._page_label.setAlignment(Qt.AlignCenter)
+        self._page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._page_label.setStyleSheet("font-size: 11px;")
         pag.addWidget(self._page_label, 1)
 
@@ -187,7 +187,7 @@ class HomologacaoTab(QWidget):
 
         # Status label
         self._status_label = QLabel()
-        self._status_label.setAlignment(Qt.AlignCenter)
+        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._status_label.setStyleSheet("font-size: 11px; color: #757575;")
         self._status_label.setVisible(False)
         layout.addWidget(self._status_label)
@@ -201,7 +201,7 @@ class HomologacaoTab(QWidget):
     def _create_card(self, item):
         """Cria widget de card para um CatalogoItem de homologação."""
         card = QWidget()
-        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         card.setStyleSheet(
             "QWidget#satirriga_card { border: 1px solid palette(mid); border-radius: 6px;"
             " padding: 6px; background: palette(base); }"
@@ -240,7 +240,7 @@ class HomologacaoTab(QWidget):
             f"background-color: {status_color}; color: white;"
             " border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: bold;"
         )
-        badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        badge.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         row1.addWidget(badge)
 
         row1.addStretch()
@@ -296,7 +296,7 @@ class HomologacaoTab(QWidget):
 
         # --- Linha 3: descrição HTML (máximo 3 linhas) ---
         desc_label = QLabel()
-        desc_label.setTextFormat(Qt.RichText)
+        desc_label.setTextFormat(Qt.TextFormat.RichText)
         desc_label.setWordWrap(True)
         desc_label.setStyleSheet("font-size: 11px; padding: 0;")
         line_height = QFontMetrics(desc_label.font()).lineSpacing()
@@ -316,7 +316,7 @@ class HomologacaoTab(QWidget):
             for line in lines:
                 if len(displayed) >= 3:
                     break
-                elided = fm.elidedText(line, Qt.ElideRight, max_width)
+                elided = fm.elidedText(line, Qt.TextElideMode.ElideRight, max_width)
                 displayed.append(elided)
             desc_label.setText("<br>".join(displayed))
             desc_label.setToolTip(plain)
@@ -594,7 +594,7 @@ class HomologacaoTab(QWidget):
         from ..dialogs.parecer_dialog import ParecerDialog
 
         dialog = ParecerDialog(zonal_id, parent=self)
-        if dialog.exec_() == ParecerDialog.Accepted:
+        if dialog.exec() == ParecerDialog.DialogCode.Accepted:
             result = dialog.get_result()
             if result:
                 decisao, motivo = result
@@ -640,10 +640,10 @@ class HomologacaoTab(QWidget):
             f"Esta ação suprimirá permanentemente o mapeamento #{mapeamento_id} "
             "e todos os seus dados associados.\n\n"
             "Esta operação é irreversível. Deseja continuar?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
-        if reply != QMessageBox.Yes:
+        if reply != QMessageBox.StandardButton.Yes:
             return
         self._controller.suprimir_mapeamento(mapeamento_id)
 

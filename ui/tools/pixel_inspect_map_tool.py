@@ -51,7 +51,7 @@ class PixelInspectMapTool(QgsMapToolEmitPoint):
             self._marker = QgsVertexMarker(self._canvas)
             self._marker.setColor(QColor(_MARKER_COLOR))
             self._marker.setFillColor(QColor(_MARKER_COLOR))
-            self._marker.setIconType(QgsVertexMarker.ICON_CROSS)
+            self._marker.setIconType(QgsVertexMarker.IconType.ICON_CROSS)
             self._marker.setIconSize(14)
             self._marker.setPenWidth(3)
         self._marker.setCenter(map_point)

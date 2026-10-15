@@ -18,7 +18,8 @@ class _FakeSignal:
 
 
 class _FakeQgsTask:
-    CanCancel = 1
+    class Flag:
+        CanCancel = 1
 
     def __init__(self, *args, **kwargs):
         pass

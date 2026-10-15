@@ -33,7 +33,7 @@ class NavButton(QPushButton):
         self.setFixedSize(40, 40)
         self.setCheckable(True)
         self.setToolTip(tooltip)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet("border: none; background: transparent;")
 
         # Carrega icone
@@ -63,7 +63,7 @@ class NavButton(QPushButton):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         pal = self.palette()
         w, h = self.width(), self.height()
@@ -91,7 +91,7 @@ class NavButton(QPushButton):
             badge_size = 14
             bx = w - badge_size - 2
             by = 2
-            painter.setPen(Qt.NoPen)
+            painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(_BADGE_BG)
             painter.drawEllipse(bx, by, badge_size, badge_size)
 
@@ -102,7 +102,7 @@ class NavButton(QPushButton):
             painter.setFont(font)
             text = str(self._badge_count) if self._badge_count < 100 else "99+"
             from qgis.PyQt.QtCore import QRect
-            painter.drawText(QRect(bx, by, badge_size, badge_size), Qt.AlignCenter, text)
+            painter.drawText(QRect(bx, by, badge_size, badge_size), Qt.AlignmentFlag.AlignCenter, text)
 
         painter.end()
 
@@ -115,7 +115,7 @@ class ActivityBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(40)
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         # Gradiente escuro derivado dos tons da logo SatIrriga
         self._grad_top = QColor("#163D64")     # Azul médio-escuro (tom da logo)
         self._grad_bottom = QColor("#1976D2")  # Azul accent da logo

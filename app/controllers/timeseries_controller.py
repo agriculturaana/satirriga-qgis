@@ -50,7 +50,7 @@ class TimeSeriesController(QObject):
         log_message(
             f"[TimeSeries] Consultando {len(points)} ponto(s) "
             f"de {start_date} a {end_date}",
-            PLUGIN_NAME, Qgis.Info,
+            PLUGIN_NAME, Qgis.MessageLevel.Info,
         )
 
     def _on_request_finished(self, request_id, status_code, body):
@@ -66,12 +66,12 @@ class TimeSeriesController(QObject):
             self.timeseries_data_ready.emit(results)
             log_message(
                 f"[TimeSeries] {len(results)} serie(s) recebida(s)",
-                PLUGIN_NAME, Qgis.Info,
+                PLUGIN_NAME, Qgis.MessageLevel.Info,
             )
         except Exception as e:
             log_message(
                 f"[TimeSeries] Erro ao parsear resposta: {e}",
-                PLUGIN_NAME, Qgis.Warning,
+                PLUGIN_NAME, Qgis.MessageLevel.Warning,
             )
             self.timeseries_error.emit(str(e))
 
@@ -81,6 +81,6 @@ class TimeSeriesController(QObject):
         self._pending_id = None
         log_message(
             f"[TimeSeries] Erro na requisição: {error_msg}",
-            PLUGIN_NAME, Qgis.Warning,
+            PLUGIN_NAME, Qgis.MessageLevel.Warning,
         )
         self.timeseries_error.emit(error_msg)

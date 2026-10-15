@@ -38,7 +38,7 @@ class ParecerDetailDialog(QDialog):
         self.setWindowTitle(f"Pareceres — Mapeamento #{self._mapeamento_id}")
         self.setMinimumWidth(480)
         self.setMaximumWidth(640)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         layout = QVBoxLayout()
         layout.setSpacing(12)
@@ -61,14 +61,14 @@ class ParecerDetailDialog(QDialog):
         if not self._pareceres:
             empty = QLabel("Nenhum parecer registrado para este mapeamento.")
             empty.setStyleSheet("font-size: 12px; color: #757575; font-style: italic;")
-            empty.setAlignment(Qt.AlignCenter)
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(empty)
         else:
             # Scroll area com cards de pareceres
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
-            scroll.setFrameShape(QFrame.NoFrame)
-            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
 
             container = QWidget()
@@ -115,7 +115,7 @@ class ParecerDetailDialog(QDialog):
         color, bg, label = style
 
         card = QFrame()
-        card.setFrameShape(QFrame.NoFrame)
+        card.setFrameShape(QFrame.Shape.NoFrame)
         card.setStyleSheet(
             f"QFrame {{ background-color: {bg}; border-left: 4px solid {color};"
             f" border-radius: 4px; padding: 8px; }}"
@@ -166,7 +166,7 @@ class ParecerDetailDialog(QDialog):
         reviewer.setStyleSheet(
             f"font-size: 11px; color: {color}; border: none; background: transparent;"
         )
-        reviewer.setTextFormat(Qt.RichText)
+        reviewer.setTextFormat(Qt.TextFormat.RichText)
         card_layout.addWidget(reviewer)
 
         # Linha 3: motivo (se houver)

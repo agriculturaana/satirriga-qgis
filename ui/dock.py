@@ -37,7 +37,7 @@ class SatIrrigaDock(QDockWidget):
         self.setObjectName("SatIrrigaDock")
 
         # Permitir apenas áreas laterais — nunca topo/base (evita reduzir altura do canvas)
-        self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         self.setMinimumWidth(340)
         self.setMaximumWidth(480)
 
@@ -88,7 +88,7 @@ class SatIrrigaDock(QDockWidget):
                            "Configurações", "Logs",
                            "Série Temporal (requer login)"):
             placeholder = QLabel(label_text)
-            placeholder.setAlignment(Qt.AlignCenter)
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
             placeholder.setStyleSheet("font-size: 12px;")
             self._pages.addWidget(placeholder)
 
@@ -96,7 +96,7 @@ class SatIrrigaDock(QDockWidget):
 
         content_widget = QWidget()
         content_widget.setLayout(content)
-        content_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        content_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         main_layout.addWidget(content_widget, 1)  # stretch=1: preenche todo espaço vertical
 
         container.setLayout(main_layout)
@@ -117,7 +117,7 @@ class SatIrrigaDock(QDockWidget):
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path)
             logo_label.setPixmap(
-                pixmap.scaled(28, 28, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                pixmap.scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             )
         logo_label.setFixedSize(28, 28)
         header.addWidget(logo_label)

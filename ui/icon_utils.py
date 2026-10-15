@@ -21,11 +21,11 @@ def tinted_icon(svg_path: str, color: str, size: int = 24) -> QIcon:
     """
     renderer = QSvgRenderer(svg_path)
     pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.transparent)
+    pixmap.fill(Qt.GlobalColor.transparent)
 
     painter = QPainter(pixmap)
     renderer.render(painter, QRectF(0, 0, size, size))
-    painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
     painter.fillRect(pixmap.rect(), QColor(color))
     painter.end()
 

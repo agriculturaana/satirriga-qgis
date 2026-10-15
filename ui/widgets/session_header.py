@@ -41,7 +41,7 @@ class SessionHeader(QWidget):
         self._login_btn.setIconSize(QSize(14, 14))
         self._login_btn.setFixedHeight(24)
         self._login_btn.setToolTip("Autenticar via SSO (Keycloak)")
-        self._login_btn.setCursor(Qt.PointingHandCursor)
+        self._login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._login_btn.setStyleSheet(
             "QPushButton { background-color: #1976D2; color: white; "
             "border-radius: 4px; padding: 2px 12px; font-size: 11px; border: none; }"
@@ -54,7 +54,7 @@ class SessionHeader(QWidget):
         self._user_btn = QPushButton()
         self._user_btn.setFixedHeight(24)
         self._user_btn.setToolTip("Detalhes da sessão e logout")
-        self._user_btn.setCursor(Qt.PointingHandCursor)
+        self._user_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._user_btn.setStyleSheet(
             "QPushButton { background: transparent; border: none; "
             "font-size: 11px; font-weight: bold; color: #ECEFF1; padding: 2px 4px; }"

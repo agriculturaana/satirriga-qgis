@@ -28,24 +28,24 @@ class HomeTab(QWidget):
         layout.setSpacing(0)
 
         pal = self.palette()
-        mid_color = pal.color(QPalette.Mid).name()
-        text_color = pal.color(QPalette.WindowText).name()
+        mid_color = pal.color(QPalette.ColorRole.Mid).name()
+        text_color = pal.color(QPalette.ColorRole.WindowText).name()
 
         # Logo SatIrriga
         logo_label = QLabel()
-        logo_label.setAlignment(Qt.AlignCenter)
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo_path = os.path.join(_ASSETS_DIR, "logo.png")
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path)
             logo_label.setPixmap(
-                pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                pixmap.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             )
         logo_label.setFixedHeight(72)
         layout.addWidget(logo_label)
 
         # Titulo
         title = QLabel("SatIrriga")
-        title.setAlignment(Qt.AlignCenter)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(title)
 
@@ -53,7 +53,7 @@ class HomeTab(QWidget):
 
         # Subtitulo
         subtitle = QLabel("Monitoramento de Irrigação por Satélite")
-        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setStyleSheet(f"font-size: 12px; color: {mid_color};")
         layout.addWidget(subtitle)
 
@@ -64,7 +64,7 @@ class HomeTab(QWidget):
             "Plugin QGIS para classificação e monitoramento\n"
             "de áreas irrigadas via sensoriamento remoto."
         )
-        desc.setAlignment(Qt.AlignCenter)
+        desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         desc.setWordWrap(True)
         desc.setStyleSheet(f"font-size: 11px; color: {text_color};")
         layout.addWidget(desc)
@@ -74,7 +74,7 @@ class HomeTab(QWidget):
 
         # Separador
         separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShape(QFrame.Shape.HLine)
         separator.setStyleSheet(f"color: {mid_color};")
         separator.setFixedHeight(1)
         layout.addWidget(separator)
@@ -84,25 +84,25 @@ class HomeTab(QWidget):
         # Logos institucionais
         logos_layout = QHBoxLayout()
         logos_layout.setSpacing(24)
-        logos_layout.setAlignment(Qt.AlignCenter)
+        logos_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         for name, filename in (("ANA", "ana.png"), ("INPE", "inpe.png")):
             col = QVBoxLayout()
             col.setSpacing(4)
-            col.setAlignment(Qt.AlignCenter)
+            col.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
             img_label = QLabel()
-            img_label.setAlignment(Qt.AlignCenter)
+            img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             img_path = os.path.join(_ASSETS_DIR, "logos", filename)
             if os.path.exists(img_path):
                 px = QPixmap(img_path)
                 img_label.setPixmap(
-                    px.scaledToHeight(40, Qt.SmoothTransformation)
+                    px.scaledToHeight(40, Qt.TransformationMode.SmoothTransformation)
                 )
             col.addWidget(img_label)
 
             text_label = QLabel(name)
-            text_label.setAlignment(Qt.AlignCenter)
+            text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             text_label.setStyleSheet(f"font-size: 10px; color: {mid_color};")
             col.addWidget(text_label)
 
@@ -114,7 +114,7 @@ class HomeTab(QWidget):
 
         # Versao
         version_label = QLabel(f"v{PLUGIN_VERSION}")
-        version_label.setAlignment(Qt.AlignCenter)
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.setStyleSheet(f"font-size: 10px; color: {mid_color};")
         layout.addWidget(version_label)
 

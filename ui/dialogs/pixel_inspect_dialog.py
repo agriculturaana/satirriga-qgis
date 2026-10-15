@@ -88,7 +88,7 @@ class PixelInspectDialog(QDialog):
 
         self.setWindowTitle("Inspeção de pixel — SatIrriga")
         self.setWindowFlags(
-            Qt.Tool | Qt.WindowStaysOnTopHint | Qt.WindowCloseButtonHint
+            Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.WindowCloseButtonHint
         )
         self.setModal(False)
         self.setMinimumWidth(360)
@@ -132,7 +132,7 @@ class PixelInspectDialog(QDialog):
 
         # --- Grid 2x3 dos indices ---
         self._grid_frame = QFrame()
-        self._grid_frame.setFrameShape(QFrame.NoFrame)
+        self._grid_frame.setFrameShape(QFrame.Shape.NoFrame)
         grid = QGridLayout()
         grid.setContentsMargins(0, 4, 0, 4)
         grid.setHorizontalSpacing(8)
@@ -154,7 +154,7 @@ class PixelInspectDialog(QDialog):
         # --- Mensagem de estado vazio/erro ---
         self._message_label = QLabel("")
         self._message_label.setWordWrap(True)
-        self._message_label.setAlignment(Qt.AlignCenter)
+        self._message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._message_label.setStyleSheet(
             "font-size: 11px; color: #757575; border: none; "
             "background: transparent; padding: 6px;"
@@ -192,12 +192,12 @@ class PixelInspectDialog(QDialog):
 
     def _build_cell(self, key: str, label: str, tooltip: str) -> QWidget:
         cell = QFrame()
-        cell.setFrameShape(QFrame.StyledPanel)
+        cell.setFrameShape(QFrame.Shape.StyledPanel)
         cell.setStyleSheet(
             "QFrame { background-color: #FAFAFA; border: 1px solid #E0E0E0; "
             "border-radius: 4px; padding: 4px 6px; }"
         )
-        cell.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        cell.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         cell.setToolTip(tooltip)
 
         cell_layout = QVBoxLayout()

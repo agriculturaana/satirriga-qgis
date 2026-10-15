@@ -89,7 +89,7 @@ class AuthController(QObject):
     def _on_token_response(self, reply):
         """Processa resposta do token endpoint."""
         self._token_reply = None
-        status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
         body = bytes(reply.readAll())
         reply.deleteLater()
 
@@ -109,7 +109,7 @@ class AuthController(QObject):
 
                 log_message(
                     f"Login bem-sucedido: {user.email}",
-                    PLUGIN_NAME, Qgis.Info,
+                    PLUGIN_NAME, Qgis.MessageLevel.Info,
                 )
             except Exception as e:
                 self._on_auth_error(f"Erro ao processar tokens: {e}")
@@ -120,7 +120,7 @@ class AuthController(QObject):
         self._state.set_loading("auth", False)
         self._state.set_error("auth", message)
         log_message(
-            f"Auth error: {message}", PLUGIN_NAME, Qgis.Warning,
+            f"Auth error: {message}", PLUGIN_NAME, Qgis.MessageLevel.Warning,
         )
 
     # ----------------------------------------------------------------
@@ -187,11 +187,11 @@ class AuthController(QObject):
             self._state.user = user
             self._state.is_authenticated = True
             log_message(
-                f"Sessao restaurada: {user.email}", PLUGIN_NAME, Qgis.Info,
+                f"Sessao restaurada: {user.email}", PLUGIN_NAME, Qgis.MessageLevel.Info,
             )
         else:
             log_message(
-                "Restauracao de sessao falhou", PLUGIN_NAME, Qgis.Info,
+                "Restauracao de sessao falhou", PLUGIN_NAME, Qgis.MessageLevel.Info,
             )
 
     # ----------------------------------------------------------------
@@ -207,7 +207,7 @@ class AuthController(QObject):
         self._state.is_authenticated = False
         self._state.user = None
 
-        log_message("Logout realizado", PLUGIN_NAME, Qgis.Info)
+        log_message("Logout realizado", PLUGIN_NAME, Qgis.MessageLevel.Info)
 
     # ----------------------------------------------------------------
     # Cleanup

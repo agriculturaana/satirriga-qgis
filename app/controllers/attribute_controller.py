@@ -118,14 +118,14 @@ class AttributeEditController(QObject):
 
         log_message(
             f"Dialog de atributos aberto para feature #{feature.id()}",
-            PLUGIN_NAME, Qgis.Info,
+            PLUGIN_NAME, Qgis.MessageLevel.Info,
         )
 
     def _on_feature_saved(self, fid):
         """Handler apos salvar feature — propaga signal para o plugin."""
         log_message(
             f"Atributos da feature #{fid} salvos",
-            PLUGIN_NAME, Qgis.Info,
+            PLUGIN_NAME, Qgis.MessageLevel.Info,
         )
         self.feature_saved.emit(fid)
 

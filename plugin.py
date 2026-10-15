@@ -121,7 +121,7 @@ class SatIrrigaPlugin:
     def tr(self, message):
         return QCoreApplication.translate("SatIrrigaPlugin", message)
 
-    def _log(self, message, level=Qgis.Info):
+    def _log(self, message, level=Qgis.MessageLevel.Info):
         log_message(message, PLUGIN_NAME, level)
 
     def add_action(self, icon_path, text, callback, enabled_flag=True,
@@ -177,7 +177,7 @@ class SatIrrigaPlugin:
             self._log(
                 f"Erro na inicializacao dos servicos: {e}\n"
                 f"{traceback.format_exc()}",
-                Qgis.Critical,
+                Qgis.MessageLevel.Critical,
             )
 
         self._log("Plugin v2 carregado")
@@ -296,7 +296,7 @@ class SatIrrigaPlugin:
             except Exception as e:
                 self._log(
                     f"[Auth] Falha ao remover interceptor de tiles: {e}",
-                    Qgis.Warning,
+                    Qgis.MessageLevel.Warning,
                 )
             self._tile_auth_set = False
             self._tile_auth_processor_id = None
@@ -326,12 +326,12 @@ class SatIrrigaPlugin:
                     self._log(
                         f"Erro ao criar dock: {e}\n"
                         f"{traceback.format_exc()}",
-                        Qgis.Critical,
+                        Qgis.MessageLevel.Critical,
                     )
                     self.plugin_is_active = False
                     return
 
-            self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dock)
+            self.iface.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock)
             self.dock.show()
 
     def _connect(self, signal, slot):
@@ -619,7 +619,7 @@ class SatIrrigaPlugin:
         if pending_count > 0:
             self._log(
                 f"{pending_count} camada(s) com edicoes pendentes detectada(s)",
-                Qgis.Info,
+                Qgis.MessageLevel.Info,
             )
         if reconnected > 0:
             self._log(f"Reconexao de {reconnected} camada(s) SatIrriga concluida")
@@ -796,7 +796,7 @@ class SatIrrigaPlugin:
             # Nunca propagar excecao para a thread de rede do Qt
             self._log(
                 f"[Auth] Falha ao injetar token em tile base: {e}",
-                Qgis.Warning,
+                Qgis.MessageLevel.Warning,
             )
 
     def _setup_tile_auth(self):
@@ -828,7 +828,7 @@ class SatIrrigaPlugin:
         except Exception as e:
             self._log(
                 f"[Auth] Falha ao registrar interceptor de tiles: {e}",
-                Qgis.Warning,
+                Qgis.MessageLevel.Warning,
             )
 
     def _remove_zonal_group(self, parent_group, zonal_id):
@@ -904,7 +904,7 @@ class SatIrrigaPlugin:
         except ImportError as exc:
             self._log(
                 f"Falha ao importar bases_layer_factory: {exc}",
-                Qgis.Critical,
+                Qgis.MessageLevel.Critical,
             )
             return
 
@@ -918,7 +918,7 @@ class SatIrrigaPlugin:
             except Exception as exc:  # noqa: BLE001
                 self._log(
                     f"Falha ao criar camada base '{layer_id}': {exc}",
-                    Qgis.Warning,
+                    Qgis.MessageLevel.Warning,
                 )
                 continue
 
@@ -926,7 +926,7 @@ class SatIrrigaPlugin:
             # extent atual do canvas. Reutiliza este mesmo plugin via
             # qgis.utils.plugins['satirriga_qgis'].
             action = QgsAction(
-                QgsAction.GenericPython,
+                QgsAction.ActionType.GenericPython,
                 "Atualizar com viewport atual",
                 (
                     "from qgis.utils import plugins\n"
@@ -1022,7 +1022,7 @@ class SatIrrigaPlugin:
         except Exception as exc:  # noqa: BLE001
             self._log(
                 f"Falha ao transformar bbox para 4674: {exc}",
-                Qgis.Warning,
+                Qgis.MessageLevel.Warning,
             )
             return None
 
@@ -1047,7 +1047,7 @@ class SatIrrigaPlugin:
     def _on_base_layer_failed(self, layer_id: str, error_msg: str):
         self._log(
             f"Camada base '{layer_id}' falhou: {error_msg}",
-            Qgis.Warning,
+            Qgis.MessageLevel.Warning,
         )
         self.iface.messageBar().pushWarning(PLUGIN_NAME, error_msg)
 
@@ -1125,7 +1125,7 @@ class SatIrrigaPlugin:
             from qgis.core import QgsFillSymbol
             symbol = QgsFillSymbol.createSimple({})
             sl = symbol.symbolLayer(0)
-            sl.setBrushStyle(Qt.NoBrush)
+            sl.setBrushStyle(Qt.BrushStyle.NoBrush)
             sl.setStrokeColor(QColor("#FF6600"))
             sl.setStrokeWidth(0.8)
             layer.renderer().setSymbol(symbol)
@@ -1144,7 +1144,7 @@ class SatIrrigaPlugin:
                 self.iface.mapCanvas().setExtent(layer.extent())
                 self.iface.mapCanvas().refresh()
         else:
-            self._log(f"Falha ao carregar GPKG V2: {gpkg_path}", Qgis.Warning)
+            self._log(f"Falha ao carregar GPKG V2: {gpkg_path}", Qgis.MessageLevel.Warning)
 
         # Dispara carregamento automatico de rasters de referencia
         if job_id and metodo_apply:
@@ -1220,7 +1220,7 @@ class SatIrrigaPlugin:
         if not sublayer_names:
             self._log(
                 f"GPKG do mapeamento homologado nao contem camadas: {gpkg_path}",
-                Qgis.Warning,
+                Qgis.MessageLevel.Warning,
             )
             self.iface.messageBar().pushWarning(
                 PLUGIN_NAME,
@@ -1247,13 +1247,13 @@ class SatIrrigaPlugin:
                 self._log(
                     f"Camada invalida no GPKG homologado: {sublayer_name} "
                     f"(uri={uri}) — {layer.error().summary()}",
-                    Qgis.Warning,
+                    Qgis.MessageLevel.Warning,
                 )
                 continue
 
             symbol = QgsFillSymbol.createSimple({})
             sl = symbol.symbolLayer(0)
-            sl.setBrushStyle(Qt.NoBrush)
+            sl.setBrushStyle(Qt.BrushStyle.NoBrush)
             sl.setStrokeColor(QColor("#2E7D32"))
             sl.setStrokeWidth(0.8)
             if layer.renderer() is not None:
@@ -1273,7 +1273,7 @@ class SatIrrigaPlugin:
             origin_group.removeChildNode(group)
             self._log(
                 f"Falha ao carregar todas as camadas do GPKG homologado: {gpkg_path}",
-                Qgis.Warning,
+                Qgis.MessageLevel.Warning,
             )
             self.iface.messageBar().pushWarning(
                 PLUGIN_NAME,
@@ -1307,7 +1307,7 @@ class SatIrrigaPlugin:
         except Exception as exc:  # noqa: BLE001
             self._log(
                 f"ogr.Open falhou para GPKG homologado {gpkg_path}: {exc}",
-                Qgis.Warning,
+                Qgis.MessageLevel.Warning,
             )
             return []
         if ds is None:
@@ -1396,7 +1396,7 @@ class SatIrrigaPlugin:
                     if not layer.isValid():
                         self._log(
                             f"Camada raster invalida: {config.name}",
-                            Qgis.Warning,
+                            Qgis.MessageLevel.Warning,
                         )
                         continue
 
@@ -1473,17 +1473,17 @@ class SatIrrigaPlugin:
         layer = QgsVectorLayer(vsimem_path, "Máscara", "ogr")
         if not layer.isValid():
             gdal.Unlink(vsimem_path)
-            self._log("Falha ao criar camada Máscara/ROI", Qgis.Warning)
+            self._log("Falha ao criar camada Máscara/ROI", Qgis.MessageLevel.Warning)
             return
 
         # Estilo: sem preenchimento, borda amarela tracejada (stroke fino)
         # Aplicado ANTES de addMapLayer para que a legenda já reflita
         symbol = QgsFillSymbol.createSimple({})
         sl = symbol.symbolLayer(0)
-        sl.setBrushStyle(Qt.NoBrush)
+        sl.setBrushStyle(Qt.BrushStyle.NoBrush)
         sl.setStrokeColor(QColor("#ffcc66"))
         sl.setStrokeWidth(0.5)
-        sl.setStrokeStyle(Qt.DashLine)
+        sl.setStrokeStyle(Qt.PenStyle.DashLine)
         layer.renderer().setSymbol(symbol)
 
         layer.setReadOnly(True)
@@ -1512,7 +1512,7 @@ class SatIrrigaPlugin:
         vis_params = VisParams(**_json.loads(vis_json))
 
         dialog = VisParamsDialog(vis_params, parent=self.dock)
-        if dialog.exec_() == VisParamsDialog.Accepted:
+        if dialog.exec() == VisParamsDialog.DialogCode.Accepted:
             new_params = dialog.get_params()
             new_url = build_xyz_url(image_id, new_params)
             self._replace_raster_layer(layer, new_url, new_params)
@@ -1551,7 +1551,7 @@ class SatIrrigaPlugin:
         uri = f"type=xyz&url={safe_url}&zmin=0&zmax=18"
         new_layer = QgsRasterLayer(uri, layer_name, "wms")
         if not new_layer.isValid():
-            self._log(f"Falha ao recriar camada raster: {layer_name}", Qgis.Warning)
+            self._log(f"Falha ao recriar camada raster: {layer_name}", Qgis.MessageLevel.Warning)
             return
 
         # Custom properties
@@ -1584,7 +1584,7 @@ class SatIrrigaPlugin:
         try:
             data = json.loads(body)
         except Exception as e:
-            self._log(f"Erro ao parsear conflitos: {e}", Qgis.Warning)
+            self._log(f"Erro ao parsear conflitos: {e}", Qgis.MessageLevel.Warning)
             return
 
         from .domain.models.conflict import ConflictSet
@@ -1600,4 +1600,4 @@ class SatIrrigaPlugin:
                 batch_uuid, decisions
             )
         )
-        dialog.exec_()
+        dialog.exec()

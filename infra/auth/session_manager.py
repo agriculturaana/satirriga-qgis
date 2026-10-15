@@ -58,7 +58,7 @@ class SessionManager(QObject):
 
         log_message(
             f"Refresh agendado em {refresh_in_ms // 1000}s",
-            PLUGIN_NAME, Qgis.Info,
+            PLUGIN_NAME, Qgis.MessageLevel.Info,
         )
 
     def _on_countdown_tick(self):
@@ -93,7 +93,7 @@ class SessionManager(QObject):
     def _on_refresh_finished(self, reply):
         """Processa resposta do refresh."""
         self._refresh_reply = None
-        status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
         body = bytes(reply.readAll())
         reply.deleteLater()
 
@@ -104,16 +104,16 @@ class SessionManager(QObject):
                 self._schedule_refresh()
                 self.session_refreshed.emit()
                 log_message(
-                    "Sessao renovada com sucesso", PLUGIN_NAME, Qgis.Info,
+                    "Sessao renovada com sucesso", PLUGIN_NAME, Qgis.MessageLevel.Info,
                 )
             except Exception as e:
                 log_message(
-                    f"Erro ao processar refresh: {e}", PLUGIN_NAME, Qgis.Warning,
+                    f"Erro ao processar refresh: {e}", PLUGIN_NAME, Qgis.MessageLevel.Warning,
                 )
                 self.session_expired.emit()
         else:
             log_message(
-                f"Refresh falhou (HTTP {status})", PLUGIN_NAME, Qgis.Warning,
+                f"Refresh falhou (HTTP {status})", PLUGIN_NAME, Qgis.MessageLevel.Warning,
             )
             self.stop()
             self.session_expired.emit()
@@ -144,7 +144,7 @@ class SessionManager(QObject):
 
     def _on_restore_finished(self, reply, callback):
         self._restore_reply = None
-        status = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
         body = bytes(reply.readAll())
         reply.deleteLater()
 
@@ -158,7 +158,7 @@ class SessionManager(QObject):
             except Exception as e:
                 log_message(
                     f"Erro ao processar restauracao de sessao: {e}",
-                    PLUGIN_NAME, Qgis.Warning,
+                    PLUGIN_NAME, Qgis.MessageLevel.Warning,
                 )
                 self.stop()
 

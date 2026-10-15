@@ -124,14 +124,14 @@ class AttributeEditDialog(QDialog):
 
         # Separador
         sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setFrameShadow(QFrame.Sunken)
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
         root.addWidget(sep)
 
         # --- Body: scroll com secoes ---
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         container = QWidget()
         self._body_layout = QVBoxLayout()
@@ -194,7 +194,7 @@ class AttributeEditDialog(QDialog):
 
         for group in groups:
             form = QFormLayout()
-            form.setLabelAlignment(Qt.AlignRight)
+            form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
             has_fields = False
 
             for fspec in group.fields:
@@ -230,7 +230,7 @@ class AttributeEditDialog(QDialog):
 
         if unmapped:
             form = QFormLayout()
-            form.setLabelAlignment(Qt.AlignRight)
+            form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
             for fname in sorted(unmapped):
                 fspec = get_field_spec(fname)
                 widget = self._create_widget(fspec)
@@ -266,7 +266,7 @@ class AttributeEditDialog(QDialog):
         if not self._overlay:
             log_message(
                 f"[Overlay/Dialog] overlay vazio ou None para feature #{self._fid}",
-                _TAG, Qgis.Info,
+                _TAG, Qgis.MessageLevel.Info,
             )
             return
 
@@ -275,14 +275,14 @@ class AttributeEditDialog(QDialog):
         if original_fid_idx < 0:
             log_message(
                 f"[Overlay/Dialog] campo _original_fid nao encontrado no layer",
-                _TAG, Qgis.Warning,
+                _TAG, Qgis.MessageLevel.Warning,
             )
             return
         original_fid = self._feature.attribute(original_fid_idx)
         if original_fid is None:
             log_message(
                 f"[Overlay/Dialog] _original_fid e NULL para feature #{self._fid}",
-                _TAG, Qgis.Warning,
+                _TAG, Qgis.MessageLevel.Warning,
             )
             return
 
@@ -292,7 +292,7 @@ class AttributeEditDialog(QDialog):
             log_message(
                 f"[Overlay/Dialog] chave {original_fid!r} (tipo {type(original_fid).__name__}) "
                 f"nao encontrada no overlay. Chaves disponiveis: {overlay_keys}",
-                _TAG, Qgis.Warning,
+                _TAG, Qgis.MessageLevel.Warning,
             )
             return
 
@@ -303,7 +303,7 @@ class AttributeEditDialog(QDialog):
         # data de referencia do mapeamento). Nos metodos de deteccao de
         # mudanca (2a/2b) ha tambem a segunda imagem da comparacao.
         img_form = QFormLayout()
-        img_form.setLabelAlignment(Qt.AlignRight)
+        img_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         img_fields = [
             ("Tile", entry.get("tile")),
             ("Imagem", entry.get("id_img")),
@@ -322,7 +322,7 @@ class AttributeEditDialog(QDialog):
 
         # --- Localizacao ---
         loc_form = QFormLayout()
-        loc_form.setLabelAlignment(Qt.AlignRight)
+        loc_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         loc_fields = [
             ("Municipio", entry.get("munnm")),
             ("Cod. Municipio", entry.get("muncd")),
@@ -352,12 +352,12 @@ class AttributeEditDialog(QDialog):
             headers = ["Codigo", "Nome", "Usuario", "CPF/CNPJ", "NARH"]
             table = QTableWidget(len(empre), len(headers))
             table.setHorizontalHeaderLabels(headers)
-            table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-            table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+            table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             table.setAlternatingRowColors(True)
             table.verticalHeader().setVisible(False)
             table.horizontalHeader().setStretchLastSection(True)
-            table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+            table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
             table.setStyleSheet(
                 "QTableWidget { font-size: 11px; border: 1px solid palette(mid); }"
                 "QHeaderView::section { font-size: 11px; font-weight: bold; "
@@ -425,7 +425,7 @@ class AttributeEditDialog(QDialog):
         if wtype == FieldWidgetType.COMBO:
             combo = QComboBox()
             combo.setEditable(True)
-            combo.setInsertPolicy(QComboBox.NoInsert)
+            combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
 
             # Valores do schema
             values = list(fspec.combo_values)

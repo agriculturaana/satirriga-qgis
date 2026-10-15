@@ -20,7 +20,7 @@ class SectionHeader(QWidget):
     def __init__(self, title, subtitle=None, parent=None):
         super().__init__(parent)
         self.setFixedHeight(28)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         layout = QHBoxLayout()
         layout.setContentsMargins(10, 0, 8, 0)

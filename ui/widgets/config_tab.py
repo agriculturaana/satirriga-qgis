@@ -39,7 +39,7 @@ class ConfigTab(QWidget):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 
         inner = QWidget()
         layout = QVBoxLayout()
@@ -118,7 +118,7 @@ class ConfigTab(QWidget):
 
         # Status label
         self._status_label = QLabel()
-        self._status_label.setAlignment(Qt.AlignCenter)
+        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._status_label.setStyleSheet("font-size: 11px;")
         self._status_label.setVisible(False)
         layout.addWidget(self._status_label)
@@ -235,7 +235,7 @@ class ConfigTab(QWidget):
             log_message(
                 f"[VisConfig] Salvo {band_key}: min={params.min_val} max={params.max_val} "
                 f"gamma={params.gamma} palette={params.palette}",
-                "SatIrriga", Qgis.Info,
+                "SatIrriga", Qgis.MessageLevel.Info,
             )
 
     def _load_vis_config(self):
@@ -305,7 +305,7 @@ class ConfigTab(QWidget):
             from ...infra.message_log import log_message
             log_message(
                 f"[Config] Erro ao salvar vis config: {e}",
-                "SatIrriga", Qgis.Warning,
+                "SatIrriga", Qgis.MessageLevel.Warning,
             )
         self._show_status("Configurações salvas com sucesso!")
 

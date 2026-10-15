@@ -30,7 +30,7 @@ class CompareDialog(QDialog):
             f"Versão atual do zonal: <b>v{self._current_version}</b><br>"
             f"<small>{len(self._versions)} versão(ões) disponível(is) para comparação.</small>"
         )
-        info.setTextFormat(Qt.RichText)
+        info.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(info)
 
         # Seleção de versões
@@ -73,15 +73,15 @@ class CompareDialog(QDialog):
             "<span style='color:#F44336'>● DELETED</span> — feições removidas<br>"
             "<span style='color:#9E9E9E'>● ACCEPTED</span> — sem alteração"
         )
-        legend.setTextFormat(Qt.RichText)
+        legend.setTextFormat(Qt.TextFormat.RichText)
         legend.setStyleSheet("font-size: 11px;")
         layout.addWidget(legend)
 
         # Botões
         buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.button(QDialogButtonBox.Ok).setText("Comparar")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Comparar")
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

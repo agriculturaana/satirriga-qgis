@@ -98,10 +98,10 @@ class CamadasTab(QWidget):
 
         # Lista de cards
         self._card_list = QListWidget()
-        self._card_list.setSelectionMode(QListWidget.NoSelection)
-        self._card_list.setFocusPolicy(Qt.NoFocus)
-        self._card_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._card_list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        self._card_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self._card_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._card_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._card_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self._card_list.setSpacing(4)
         self._card_list.setStyleSheet(
             "QListWidget { border: none; background: transparent; }"
@@ -116,7 +116,7 @@ class CamadasTab(QWidget):
 
         # Loading / status
         self._status_label = QLabel("Nenhuma camada local encontrada")
-        self._status_label.setAlignment(Qt.AlignCenter)
+        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._status_label.setStyleSheet("color: #757575; font-size: 11px;")
         layout.addWidget(self._status_label)
 
@@ -141,7 +141,7 @@ class CamadasTab(QWidget):
     def _create_card(self, gpkg_info, counts):
         """Cria widget de card para um GPKG local."""
         card = QWidget()
-        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         card.setStyleSheet(
             "QWidget#satirriga_card { border: 1px solid palette(mid); border-radius: 6px;"
             " padding: 6px; background: palette(base); }"
@@ -180,7 +180,7 @@ class CamadasTab(QWidget):
             f"background-color: {origin_color}; color: white;"
             " border-radius: 3px; padding: 1px 6px; font-size: 10px;"
         )
-        origin_badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        origin_badge.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         row1.addWidget(origin_badge)
 
         # Sync status badge
@@ -190,7 +190,7 @@ class CamadasTab(QWidget):
             f"background-color: {sync_color}; color: white;"
             " border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: bold;"
         )
-        badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        badge.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         row1.addWidget(badge)
 
         # Após um upload, identificadores e índices das feições novas ou
@@ -206,12 +206,12 @@ class CamadasTab(QWidget):
                 "background-color: #E65100; color: white;"
                 " border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: bold;"
             )
-            stale_badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+            stale_badge.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
             row1.addWidget(stale_badge)
 
         # Queue status badge (overlay/zonal) — visível somente durante polling
         queue_badge = QLabel()
-        queue_badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        queue_badge.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         queue_badge.setVisible(False)
         row1.addWidget(queue_badge)
         card._queue_badge = queue_badge
@@ -243,7 +243,7 @@ class CamadasTab(QWidget):
 
         # --- Linha 3: descrição (HTML, máx 3 linhas, com tooltip) ---
         desc_label = QLabel()
-        desc_label.setTextFormat(Qt.RichText)
+        desc_label.setTextFormat(Qt.TextFormat.RichText)
         desc_label.setWordWrap(True)
         desc_label.setStyleSheet("font-size: 11px; padding: 0;")
         line_height = QFontMetrics(desc_label.font()).lineSpacing()
@@ -263,7 +263,7 @@ class CamadasTab(QWidget):
             for line in plain.split("\n"):
                 if len(displayed) >= 3:
                     break
-                displayed.append(fm.elidedText(line, Qt.ElideRight, max_width))
+                displayed.append(fm.elidedText(line, Qt.TextElideMode.ElideRight, max_width))
             desc_label.setText("<br>".join(displayed))
             desc_label.setToolTip(plain)
         else:
@@ -560,7 +560,7 @@ class CamadasTab(QWidget):
     def _on_upload_cancelled(self):
         log_message(
             f"Upload cancelado pelo usuario: batch {self._active_batch_uuid}",
-            PLUGIN_NAME, Qgis.Info,
+            PLUGIN_NAME, Qgis.MessageLevel.Info,
         )
 
     def _encerrar_mapeamento(self, mapeamento_id):
@@ -570,10 +570,10 @@ class CamadasTab(QWidget):
             "Confirmar encerramento",
             f"Encerrar mapeamento #{mapeamento_id} para homologação?\n\n"
             "Todos os zonais consolidados serão enviados para revisão.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             self._controller.encerrar_mapeamento(mapeamento_id)
 
     def _on_mapeamento_encerrado(self, data):
@@ -655,7 +655,7 @@ class CamadasTab(QWidget):
             self._gpkg_list = raw_list
         except Exception as e:
             log_message(
-                f"Erro ao listar GPKGs: {e}", PLUGIN_NAME, Qgis.Warning,
+                f"Erro ao listar GPKGs: {e}", PLUGIN_NAME, Qgis.MessageLevel.Warning,
             )
             self._gpkg_list = []
 
@@ -720,7 +720,7 @@ class CamadasTab(QWidget):
         for existing in QgsProject.instance().mapLayers().values():
             if existing.source().split("|")[0] == gpkg_path:
                 log_message(
-                    f"Camada ja carregada: {gpkg_path}", PLUGIN_NAME, Qgis.Info,
+                    f"Camada ja carregada: {gpkg_path}", PLUGIN_NAME, Qgis.MessageLevel.Info,
                 )
                 return
 
@@ -732,7 +732,7 @@ class CamadasTab(QWidget):
             from qgis.PyQt.QtGui import QColor as _QColor
             symbol = QgsFillSymbol.createSimple({})
             sl = symbol.symbolLayer(0)
-            sl.setBrushStyle(_Qt.NoBrush)
+            sl.setBrushStyle(_Qt.BrushStyle.NoBrush)
             sl.setStrokeColor(_QColor("#FF6600"))
             sl.setStrokeWidth(0.8)
             layer.renderer().setSymbol(symbol)
@@ -747,11 +747,11 @@ class CamadasTab(QWidget):
                 self._controller.fetch_overlay_data(zonal_id)
 
             log_message(
-                f"Camada aberta: {gpkg_path}", PLUGIN_NAME, Qgis.Info,
+                f"Camada aberta: {gpkg_path}", PLUGIN_NAME, Qgis.MessageLevel.Info,
             )
         else:
             log_message(
-                f"Falha ao abrir GPKG: {gpkg_path}", PLUGIN_NAME, Qgis.Warning,
+                f"Falha ao abrir GPKG: {gpkg_path}", PLUGIN_NAME, Qgis.MessageLevel.Warning,
             )
 
     def _upload_gpkg(self, gpkg_path):
@@ -770,10 +770,10 @@ class CamadasTab(QWidget):
                 "Cópias idênticas serão descartadas pelo servidor; cópias com "
                 "geometria diferente serão tratadas como feições novas.\n"
                 "Deseja enviar mesmo assim?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
             )
-            if reply != QMessageBox.Yes:
+            if reply != QMessageBox.StandardButton.Yes:
                 return
         self._controller.upload_zonal_edits(gpkg_path)
 
@@ -800,10 +800,10 @@ class CamadasTab(QWidget):
             "Identificadores e índices das feições novas ou editadas mudaram no "
             "servidor, e a cópia local está desatualizada.\n"
             "Deseja baixar novamente agora?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
         )
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             self._controller.download_zonal_result(
                 zonal_id, origin=DownloadOrigin.MAPEAMENTOS.value,
             )
@@ -816,10 +816,10 @@ class CamadasTab(QWidget):
                 "Confirmar remoção",
                 f"Este GPKG tem {modified_count} feature(s) editada(s) não enviada(s).\n"
                 "Deseja remover mesmo assim?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
             )
-            if reply != QMessageBox.Yes:
+            if reply != QMessageBox.StandardButton.Yes:
                 return
 
         try:
@@ -835,12 +835,12 @@ class CamadasTab(QWidget):
                 os.remove(sc_path)
 
             log_message(
-                f"GPKG removido: {gpkg_path}", PLUGIN_NAME, Qgis.Info,
+                f"GPKG removido: {gpkg_path}", PLUGIN_NAME, Qgis.MessageLevel.Info,
             )
             self._refresh_list()
         except OSError as e:
             log_message(
-                f"Erro ao remover GPKG: {e}", PLUGIN_NAME, Qgis.Warning,
+                f"Erro ao remover GPKG: {e}", PLUGIN_NAME, Qgis.MessageLevel.Warning,
             )
 
     # ================================================================

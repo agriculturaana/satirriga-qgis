@@ -150,7 +150,7 @@ class TimeSeriesTab(QWidget):
         self._chart_layout = QVBoxLayout()
         self._chart_layout.setContentsMargins(0, 0, 0, 0)
         self._chart_container.setLayout(self._chart_layout)
-        self._chart_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._chart_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(self._chart_container, stretch=1)
 
         # -- Exportação --

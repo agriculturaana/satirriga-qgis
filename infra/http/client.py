@@ -46,7 +46,7 @@ class HttpClient(QObject):
 
         log_message(
             f"[HTTP] {method} {url} (auth={has_token})",
-            PLUGIN_NAME, Qgis.Info,
+            PLUGIN_NAME, Qgis.MessageLevel.Info,
         )
 
         if method == "GET":
@@ -75,7 +75,7 @@ class HttpClient(QObject):
         req_url = self._request_urls.pop(request_id, "?")
 
         error = reply.error()
-        status_code = reply.attribute(QNetworkRequest.HttpStatusCodeAttribute)
+        status_code = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
 
         if status_code is None:
             status_code = 0
@@ -89,7 +89,7 @@ class HttpClient(QObject):
         if error and status_code == 0:
             log_message(
                 f"[HTTP] ERRO DE REDE {req_url} -> {error_msg}",
-                PLUGIN_NAME, Qgis.Warning,
+                PLUGIN_NAME, Qgis.MessageLevel.Warning,
             )
             self.request_error.emit(request_id, f"Erro de rede: {error_msg}")
             return
@@ -97,7 +97,7 @@ class HttpClient(QObject):
         if 200 <= status_code < 300:
             log_message(
                 f"[HTTP] {status_code} {req_url} ({len(body)} bytes)",
-                PLUGIN_NAME, Qgis.Info,
+                PLUGIN_NAME, Qgis.MessageLevel.Info,
             )
             self.request_finished.emit(request_id, status_code, body)
         else:
@@ -105,7 +105,7 @@ class HttpClient(QObject):
             body_preview = body[:500].decode("utf-8", errors="replace") if body else ""
             log_message(
                 f"[HTTP] {status_code} {req_url} -> {api_error.message}\n{body_preview}",
-                PLUGIN_NAME, Qgis.Warning,
+                PLUGIN_NAME, Qgis.MessageLevel.Warning,
             )
             self.request_error.emit(request_id, api_error.message)
 

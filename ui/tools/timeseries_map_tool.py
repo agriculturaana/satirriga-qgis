@@ -32,7 +32,7 @@ class _PointLabel:
         self._map_point = map_point
 
         self._widget = QLabel(str(point_id), canvas)
-        self._widget.setAlignment(Qt.AlignCenter)
+        self._widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._widget.setFixedSize(20, 20)
         font = QFont()
         font.setPixelSize(11)
@@ -97,7 +97,7 @@ class TimeSeriesMapTool(QgsMapToolEmitPoint):
         marker.setCenter(map_point)
         marker.setColor(QColor(color))
         marker.setFillColor(QColor(color))
-        marker.setIconType(QgsVertexMarker.ICON_CIRCLE)
+        marker.setIconType(QgsVertexMarker.IconType.ICON_CIRCLE)
         marker.setIconSize(12)
         marker.setPenWidth(2)
 

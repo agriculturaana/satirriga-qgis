@@ -64,8 +64,10 @@ help:
 
 compile: $(COMPILED_RESOURCE_FILES)
 
+# O repositorio de plugins do QGIS recusa import direto de PyQt5 (compatibilidade Qt6)
 %.py: %.qrc
 	pyrcc5 -o $@ $<
+	sed -i 's/^from PyQt5 import QtCore$$/from qgis.PyQt import QtCore/' $@
 
 deploy: compile
 	@echo "Deploying $(PLUGINNAME) to $(DEPLOY_DIR) ..."

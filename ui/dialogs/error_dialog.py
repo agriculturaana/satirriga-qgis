@@ -50,7 +50,7 @@ class ErrorDialog(QDialog):
         self.setWindowTitle("SatIrriga — Erro")
         self.setMinimumWidth(460)
         self.setMaximumWidth(600)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         layout = QVBoxLayout()
         layout.setSpacing(12)
@@ -65,7 +65,7 @@ class ErrorDialog(QDialog):
             "font-size: 28px; color: #F44336; padding: 0; margin: 0;"
         )
         icon_label.setFixedWidth(36)
-        icon_label.setAlignment(Qt.AlignTop)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignTop)
         header.addWidget(icon_label)
 
         title_block = QVBoxLayout()
@@ -111,7 +111,7 @@ class ErrorDialog(QDialog):
             "padding: 0; border: none; }"
             "QPushButton:hover { color: #1565C0; text-decoration: underline; }"
         )
-        self._toggle_btn.setCursor(Qt.PointingHandCursor)
+        self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._toggle_btn.clicked.connect(self._toggle_details)
         layout.addWidget(self._toggle_btn)
 
@@ -169,4 +169,4 @@ class ErrorDialog(QDialog):
     def show_error(cls, operation, message, parent=None):
         """Atalho para exibir dialog de erro."""
         dialog = cls(operation, message, parent=parent)
-        dialog.exec_()
+        dialog.exec()

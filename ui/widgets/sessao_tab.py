@@ -29,7 +29,7 @@ class SessaoTab(QWidget):
 
         # Not authenticated message
         self._not_auth_label = QLabel("Não autenticado.\nClique em 'Entrar' no header.")
-        self._not_auth_label.setAlignment(Qt.AlignCenter)
+        self._not_auth_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._not_auth_label.setStyleSheet("color: #757575; font-size: 12px;")
         layout.addWidget(self._not_auth_label)
 
@@ -39,7 +39,7 @@ class SessaoTab(QWidget):
         details_layout.setContentsMargins(0, 0, 0, 0)
 
         form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignRight)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         self._name_label = QLabel("-")
         self._name_label.setStyleSheet("font-weight: bold;")

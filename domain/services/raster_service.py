@@ -111,7 +111,7 @@ def get_default_vis_params(band: str, sidecar: dict = None) -> VisParams:
         from qgis.core import QgsMessageLog, Qgis
         QgsMessageLog.logMessage(
             f"[VisConfig] Fallback para hardcoded ({band}): {e}",
-            "SatIrriga", Qgis.Warning,
+            "SatIrriga", Qgis.MessageLevel.Warning,
         )
         defaults = _BAND_DEFAULTS.get(band)
         if defaults:

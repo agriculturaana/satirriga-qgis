@@ -120,10 +120,10 @@ class MapeamentosTab(QWidget):
 
         # --- Lista de cards ---
         self._card_list = QListWidget()
-        self._card_list.setSelectionMode(QListWidget.NoSelection)
-        self._card_list.setFocusPolicy(Qt.NoFocus)
-        self._card_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._card_list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        self._card_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self._card_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._card_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._card_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self._card_list.setSpacing(4)
         self._card_list.setStyleSheet(
             "QListWidget { border: none; background: transparent; }"
@@ -136,7 +136,7 @@ class MapeamentosTab(QWidget):
 
         # --- Status label ---
         self._status_label = QLabel()
-        self._status_label.setAlignment(Qt.AlignCenter)
+        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._status_label.setStyleSheet("font-size: 11px; color: #757575;")
         self._status_label.setVisible(False)
         root.addWidget(self._status_label)
@@ -145,7 +145,7 @@ class MapeamentosTab(QWidget):
 
     def _build_filters(self):
         frame = QFrame()
-        frame.setFrameShape(QFrame.NoFrame)
+        frame.setFrameShape(QFrame.Shape.NoFrame)
         outer = QVBoxLayout()
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(4)
@@ -247,7 +247,7 @@ class MapeamentosTab(QWidget):
 
     def _build_pagination(self):
         frame = QFrame()
-        frame.setFrameShape(QFrame.NoFrame)
+        frame.setFrameShape(QFrame.Shape.NoFrame)
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 2, 0, 0)
         layout.setSpacing(4)
@@ -260,7 +260,7 @@ class MapeamentosTab(QWidget):
         layout.addWidget(self._btn_prev)
 
         self._page_label = QLabel()
-        self._page_label.setAlignment(Qt.AlignCenter)
+        self._page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._page_label.setStyleSheet("font-size: 11px;")
         layout.addWidget(self._page_label, 1)
 
@@ -281,7 +281,7 @@ class MapeamentosTab(QWidget):
     def _create_card(self, item):
         """Cria widget de card para um CatalogoItem."""
         card = QWidget()
-        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         card.setStyleSheet(
             "QWidget#satirriga_card { border: 1px solid palette(mid); border-radius: 6px;"
             " padding: 6px; background: palette(base); }"
@@ -321,7 +321,7 @@ class MapeamentosTab(QWidget):
             f"background-color: {status_color}; color: white;"
             " border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: bold;"
         )
-        badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        badge.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         row1.addWidget(badge)
 
         row1.addStretch()
@@ -482,7 +482,7 @@ class MapeamentosTab(QWidget):
 
         # --- Linha 3: descrição HTML (máximo 3 linhas) ---
         desc_label = QLabel()
-        desc_label.setTextFormat(Qt.RichText)
+        desc_label.setTextFormat(Qt.TextFormat.RichText)
         desc_label.setWordWrap(True)
         desc_label.setStyleSheet("font-size: 11px; padding: 0;")
         line_height = QFontMetrics(desc_label.font()).lineSpacing()
@@ -503,10 +503,10 @@ class MapeamentosTab(QWidget):
             for line in lines:
                 if len(displayed) >= 3:
                     break
-                elided = fm.elidedText(line, Qt.ElideRight, max_width)
+                elided = fm.elidedText(line, Qt.TextElideMode.ElideRight, max_width)
                 displayed.append(elided)
             if len(lines) > 3:
-                displayed[-1] = fm.elidedText(lines[2], Qt.ElideRight, max_width)
+                displayed[-1] = fm.elidedText(lines[2], Qt.TextElideMode.ElideRight, max_width)
             desc_label.setText("<br>".join(displayed))
             desc_label.setToolTip(plain)
         else:
@@ -558,7 +558,7 @@ class MapeamentosTab(QWidget):
             else:
                 sinc_label = QLabel("<span style='color:#9E9E9E'>Não baixado</span>")
             sinc_label.setStyleSheet("font-size: 10px;")
-            sinc_label.setTextFormat(Qt.RichText)
+            sinc_label.setTextFormat(Qt.TextFormat.RichText)
             row5.addWidget(sinc_label)
             row5.addStretch()
 
@@ -566,7 +566,7 @@ class MapeamentosTab(QWidget):
         except Exception as e:
             log_message(
                 f"[Catálogo] Falha ao exibir situação local do zonal #{item.id}: {e}",
-                PLUGIN_NAME, Qgis.Warning,
+                PLUGIN_NAME, Qgis.MessageLevel.Warning,
             )
 
         card.setLayout(layout)
@@ -780,7 +780,7 @@ class MapeamentosTab(QWidget):
 
             lbl = QLabel(text)
             lbl.setWordWrap(True)
-            lbl.setTextFormat(Qt.RichText)
+            lbl.setTextFormat(Qt.TextFormat.RichText)
             lbl.setStyleSheet(f"font-size: 11px; color: {style[1]}; border: none; background: transparent;")
             card_layout.addWidget(lbl, 1)
 
@@ -840,7 +840,7 @@ class MapeamentosTab(QWidget):
     def _on_reprocess_done(self, zonal_id, message):
         """Callback após reprocessamento disparado — recarrega catálogo para mostrar progresso."""
         log_message(
-            f"[Reprocess] Zonal #{zonal_id}: {message}", PLUGIN_NAME, Qgis.Info,
+            f"[Reprocess] Zonal #{zonal_id}: {message}", PLUGIN_NAME, Qgis.MessageLevel.Info,
         )
         self._request_page()
 
@@ -892,7 +892,7 @@ class MapeamentosTab(QWidget):
         """Exibe dialog com histórico de pareceres."""
         from ..dialogs.parecer_detail_dialog import ParecerDetailDialog
         dialog = ParecerDetailDialog(mapeamento_id, pareceres, parent=self)
-        dialog.exec_()
+        dialog.exec()
 
     # ================================================================
     # Loading / Error

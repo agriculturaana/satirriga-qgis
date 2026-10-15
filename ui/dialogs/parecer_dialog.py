@@ -81,7 +81,7 @@ class ParecerDialog(QDialog):
         # Contador de caracteres
         self._char_counter = QLabel(f"0 / {self._MIN_MOTIVO_CHARS}")
         self._char_counter.setStyleSheet("color: #757575; font-size: 11px;")
-        self._char_counter.setAlignment(Qt.AlignRight)
+        self._char_counter.setAlignment(Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self._char_counter)
 
         # Botoes

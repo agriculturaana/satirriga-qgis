@@ -20,11 +20,11 @@ class SatIrrigaTask(QgsTask):
     """Base class para tasks do plugin."""
 
     def __init__(self, description):
-        super().__init__(description, QgsTask.CanCancel)
+        super().__init__(description, QgsTask.Flag.CanCancel)
         self.signals = TaskSignals()
         self._exception = None
 
-    def _log(self, message, level=Qgis.Info):
+    def _log(self, message, level=Qgis.MessageLevel.Info):
         log_message(message, PLUGIN_NAME, level)
 
     def run(self):

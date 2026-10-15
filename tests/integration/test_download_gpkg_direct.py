@@ -40,7 +40,8 @@ class _Signal:
 
 
 class _QgsTask:
-    CanCancel = 1
+    class Flag:
+        CanCancel = 1
 
     def __init__(self, *args, **kwargs):
         self.progress_values = []
@@ -61,9 +62,10 @@ class _QgsMessageLog:
 
 
 class _Qgis:
-    Info = 0
-    Warning = 1
-    Critical = 2
+    class MessageLevel:
+        Info = 0
+        Warning = 1
+        Critical = 2
 
 
 class _QgsSettings:

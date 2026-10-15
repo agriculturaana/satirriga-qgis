@@ -108,7 +108,7 @@ class PixelInspectController(QObject):
         log_message(
             f"[PixelInspect] POST indices: lat={lat} lon={lon} "
             f"({len(image_ids)} cena(s))",
-            PLUGIN_NAME, Qgis.Info,
+            PLUGIN_NAME, Qgis.MessageLevel.Info,
         )
 
     def _on_request_finished(self, request_id, status_code, body):
@@ -135,7 +135,7 @@ class PixelInspectController(QObject):
         self._pending_image_ids2 = []
         log_message(
             f"[PixelInspect] Erro: {error_msg}",
-            PLUGIN_NAME, Qgis.Warning,
+            PLUGIN_NAME, Qgis.MessageLevel.Warning,
         )
         self.indexes_error.emit(error_msg)
 

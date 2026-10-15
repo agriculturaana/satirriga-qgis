@@ -103,9 +103,9 @@ class UploadHistoryWidget(QWidget):
 
         # Lista de cards
         self._card_list = QListWidget()
-        self._card_list.setSelectionMode(QListWidget.NoSelection)
-        self._card_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._card_list.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        self._card_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self._card_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._card_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self._card_list.setSpacing(4)
         self._card_list.setStyleSheet(
             "QListWidget { border: none; background: transparent; }"
@@ -125,7 +125,7 @@ class UploadHistoryWidget(QWidget):
         pag.addWidget(self._btn_prev)
 
         self._page_label = QLabel()
-        self._page_label.setAlignment(Qt.AlignCenter)
+        self._page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._page_label.setStyleSheet("font-size: 11px;")
         pag.addWidget(self._page_label, 1)
 
@@ -139,7 +139,7 @@ class UploadHistoryWidget(QWidget):
 
         # Status label
         self._status_label = QLabel()
-        self._status_label.setAlignment(Qt.AlignCenter)
+        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._status_label.setStyleSheet("font-size: 11px; color: #757575;")
         self._status_label.setVisible(False)
         layout.addWidget(self._status_label)
@@ -160,7 +160,7 @@ class UploadHistoryWidget(QWidget):
     def _create_card(self, item):
         """Cria card para um UploadHistoryItem."""
         card = QFrame()
-        card.setFrameShape(QFrame.StyledPanel)
+        card.setFrameShape(QFrame.Shape.StyledPanel)
         card.setStyleSheet(
             "QFrame { border: 1px solid palette(mid); border-radius: 6px;"
             " padding: 6px; background: palette(base); }"
@@ -197,7 +197,7 @@ class UploadHistoryWidget(QWidget):
             f"background-color: {status_color}; color: white;"
             " border-radius: 3px; padding: 1px 6px; font-size: 10px; font-weight: bold;"
         )
-        badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        badge.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         row1.addWidget(badge)
 
         row1.addStretch()
@@ -324,7 +324,7 @@ class UploadHistoryWidget(QWidget):
 
         from ..dialogs.compare_dialog import CompareDialog
         dialog = CompareDialog(versions_data, parent=self)
-        if dialog.exec_() == CompareDialog.Accepted:
+        if dialog.exec() == CompareDialog.DialogCode.Accepted:
             result = dialog.get_result()
             if result:
                 batch_a, batch_b = result
@@ -355,7 +355,7 @@ class UploadHistoryWidget(QWidget):
 
         log_message(
             f"[Compare] GPKG recebido: {batch_uuid[:8]} ({len(layer_bytes)} bytes)",
-            PLUGIN_NAME, Qgis.Info,
+            PLUGIN_NAME, Qgis.MessageLevel.Info,
         )
 
         # Quando ambos chegaram, carregar no mapa
@@ -375,7 +375,7 @@ class UploadHistoryWidget(QWidget):
             if not layer.isValid():
                 log_message(
                     f"[Compare] Camada inválida: {path}",
-                    PLUGIN_NAME, Qgis.Warning,
+                    PLUGIN_NAME, Qgis.MessageLevel.Warning,
                 )
                 continue
 
@@ -385,7 +385,7 @@ class UploadHistoryWidget(QWidget):
 
             log_message(
                 f"[Compare] Camada carregada: {layer_name} ({layer.featureCount()} feições)",
-                PLUGIN_NAME, Qgis.Info,
+                PLUGIN_NAME, Qgis.MessageLevel.Info,
             )
 
         self._compare_received.clear()

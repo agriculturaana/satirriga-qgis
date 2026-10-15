@@ -229,7 +229,7 @@ class OidcPkceFlow(QObject):
 
                 log_message(
                     f"Loopback server iniciado na porta {port}",
-                    PLUGIN_NAME, Qgis.Info,
+                    PLUGIN_NAME, Qgis.MessageLevel.Info,
                 )
                 return True
             except OSError:
@@ -237,7 +237,7 @@ class OidcPkceFlow(QObject):
 
         log_message(
             "Falha ao iniciar loopback server em todas as portas",
-            PLUGIN_NAME, Qgis.Critical,
+            PLUGIN_NAME, Qgis.MessageLevel.Critical,
         )
         return False
 
@@ -267,7 +267,7 @@ class OidcPkceFlow(QObject):
 
         log_message(
             "Abrindo browser para autenticação...",
-            PLUGIN_NAME, Qgis.Info,
+            PLUGIN_NAME, Qgis.MessageLevel.Info,
         )
         QDesktopServices.openUrl(QUrl(auth_url))
 
@@ -331,6 +331,6 @@ class OidcPkceFlow(QObject):
             except OSError as e:
                 log_message(
                     f"Falha ao encerrar loopback server: {e}",
-                    PLUGIN_NAME, Qgis.Warning,
+                    PLUGIN_NAME, Qgis.MessageLevel.Warning,
                 )
             self._server = None

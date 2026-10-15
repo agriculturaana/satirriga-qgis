@@ -22,7 +22,7 @@ class AuthInterceptor:
         self._allowed_hosts = set(hosts)
         log_message(
             f"[Auth] Hosts autorizados: {hosts}",
-            PLUGIN_NAME, Qgis.Info,
+            PLUGIN_NAME, Qgis.MessageLevel.Info,
         )
 
     def intercept(self, request: QNetworkRequest) -> QNetworkRequest:
@@ -33,7 +33,7 @@ class AuthInterceptor:
         if host not in self._allowed_hosts:
             log_message(
                 f"[Auth] Host '{host}' nao autorizado (permitidos: {self._allowed_hosts})",
-                PLUGIN_NAME, Qgis.Warning,
+                PLUGIN_NAME, Qgis.MessageLevel.Warning,
             )
             return request
 
@@ -46,7 +46,7 @@ class AuthInterceptor:
         else:
             log_message(
                 f"[Auth] Token nulo para {host} — request sem autorizacao",
-                PLUGIN_NAME, Qgis.Warning,
+                PLUGIN_NAME, Qgis.MessageLevel.Warning,
             )
 
         return request
